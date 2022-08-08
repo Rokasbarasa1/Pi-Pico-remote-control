@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "stdlib.h": "c",
+        "pico.h": "c",
+        "interrupt.h": "c"
+    }
+}
