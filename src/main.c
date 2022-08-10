@@ -11,6 +11,7 @@ char *wifi_password = "bis56lage63";
 char *server_ip = "192.168.87.178";
 char *server_port = "4000";
 
+// esp 01
 int main() {
     stdio_init_all();
     
