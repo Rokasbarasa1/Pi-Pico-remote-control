@@ -27,11 +27,12 @@ bool repeating_timer_callback(struct repeating_timer *t){
 }
 
 void button_interrupt(uint gpio, uint32_t events) {
-    // printf("%ld\n",to_ms_since_boot(get_absolute_time())-time);
+    // debounce the button.
     if ((to_ms_since_boot(get_absolute_time())-time)>delayTime) {
         time = to_ms_since_boot(get_absolute_time());
         
-        printf("GPIO %d\n", gpio);
+        // printf("GPIO %d\n", gpio);
+        button_callback();
     }
 }
 

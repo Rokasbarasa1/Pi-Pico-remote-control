@@ -52,7 +52,7 @@ int main() {
     //     "GET / HTTP/1.1\r\nHost: 192.168.87.178\r\n"
     // );
 
-    init_joystick(26,27,22, NULL);
+    init_joystick(26,27,22, sdasd);
 
     while (true) {
         printf("\nCurrent x: %d\n", get_x());
