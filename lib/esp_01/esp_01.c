@@ -58,7 +58,7 @@ bool sendAT(uart_inst_t *uart, char *command , char *ack){
     return false;
 }
 
-bool init_esp_01(uart_inst_t *uart, uint enable_pin){
+bool init_esp_01_client(uart_inst_t *uart, uint enable_pin){
 
     // enable the device 
     gpio_init(enable_pin);
@@ -74,9 +74,9 @@ bool init_esp_01(uart_inst_t *uart, uint enable_pin){
         gpio_set_function(5, GPIO_FUNC_UART);
     }
 
-    bool result1 = sendAT(uart1, "AT+RST", "ready");
-    bool result2 = sendAT(uart1, "AT+CWMODE=1", "OK");
-    bool result3 = sendAT(uart1, "AT+CWLAP", "OK");
+    bool result1 = sendAT(uart, "AT+RST", "ready");
+    bool result2 = sendAT(uart, "AT+CWMODE=1", "OK");
+    bool result3 = sendAT(uart, "AT+CWLAP", "OK");
 
     return result1 && result2 && result3;
 }

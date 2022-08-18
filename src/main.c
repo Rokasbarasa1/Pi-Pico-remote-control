@@ -4,12 +4,23 @@
 #include <string.h>
 
 #include "../lib/esp_01/esp_01.h"
+#include "../lib/joystick/joystick.h"
 
 // should put in defines
-char *wifi_name = "Stofa70521";
-char *wifi_password = "bis56lage63";
-char *server_ip = "192.168.87.178";
-char *server_port = "4000";
+// char *wifi_name = "Stofa70521";
+// char *wifi_password = "bis56lage63";
+// char *server_ip = "192.168.87.178";
+// char *server_port = "4000";
+
+
+char *wifi_name = "ESP32_wifi";
+char *wifi_password = "1234567890";
+char *server_ip = "192.168.8.1";
+char *server_port = "3500";
+
+void sdasd(){
+    printf("\nCALLED\n");
+}
 
 // esp 01
 int main() {
@@ -25,28 +36,33 @@ int main() {
     sleep_ms(5000);
 
     // init esp 01
-    init_esp_01(uart1, 3);
+    init_esp_01_client(uart1, 3);
     esp_01_connect_wifi(uart1, wifi_name, wifi_password);
     esp_01_send_http(
         uart1, 
         server_ip, 
         server_port, 
-        "GET /users HTTP/1.1\r\nHost: 192.168.87.178\r\n"
+        "GET /users HTTP/1.1\r\nHost: 192.168.8.1\r\n"
     );
 
-    esp_01_send_http(
-        uart1, 
-        server_ip, 
-        server_port, 
-        "GET / HTTP/1.1\r\nHost: 192.168.87.178\r\n"
-    );
+    // esp_01_send_http(
+    //     uart1, 
+    //     server_ip, 
+    //     server_port, 
+    //     "GET / HTTP/1.1\r\nHost: 192.168.87.178\r\n"
+    // );
+
+    init_joystick(26,27,22, NULL);
 
     while (true) {
+        printf("\nCurrent x: %d\n", get_x());
+        printf("Current y: %d\n", get_y());
+
         gpio_put(2, 1);
-        sleep_ms(100);
+        sleep_ms(200);
 
         gpio_put(2, 0);
-        sleep_ms(100);
+        sleep_ms(200);
     }
 }
 

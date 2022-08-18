@@ -2,6 +2,9 @@
     "files.associations": {
         "stdlib.h": "c",
         "pico.h": "c",
-        "interrupt.h": "c"
+        "interrupt.h": "c",
+        "time.h": "c",
+        "stdio.h": "c",
+        "joystick.h": "c"
     }
 }
