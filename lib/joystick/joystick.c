@@ -108,3 +108,11 @@ uint16_t get_x(){
 uint16_t get_y(){
     return current_y;
 }
+
+float get_x_percentage(){
+    return ((float)current_x*100)/4095;
+}
+
+float get_y_percentage(){
+    return ((float)current_y*100)/4095;
+}

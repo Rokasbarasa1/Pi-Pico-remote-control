@@ -8,3 +8,5 @@
 bool init_joystick(uint x_axis_pin, uint y_axis_pin, uint button_pin, void (*button_callback_temp)());
 uint16_t get_x();
 uint16_t get_y();
+float get_x_percentage();
+float get_y_percentage();
