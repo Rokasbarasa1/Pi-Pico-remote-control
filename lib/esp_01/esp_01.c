@@ -2,7 +2,7 @@
 
 bool first_transmission = true;
 
-bool sendAT(uart_inst_t *uart, char *command , char *ack, uint timeout_ms){
+bool sendAT(uart_inst_t *uart, char *command , char *ack, uint timeout_ms, bool logging){
     // put the closing tags to the command... pain in the ass
     char command_result[strlen(command) + 2];
     memset(command_result, 0, (strlen(command) + 2)*sizeof(char));
@@ -40,13 +40,18 @@ bool sendAT(uart_inst_t *uart, char *command , char *ack, uint timeout_ms){
                 break;
             }
             char data = uart_getc(uart1);
-            printf("%c", data);
+            if(logging){
+                printf("%c", data);
+            }
 
             // Check if ack reached
             if(data == ack[u]){
                 u++;
                 if(u == ack_length){
-                    printf("\n");
+                    if(logging){
+                        printf("\n");
+                    }
+                    
                     return true;
                 }
             }else{
@@ -56,7 +61,9 @@ bool sendAT(uart_inst_t *uart, char *command , char *ack, uint timeout_ms){
             if(data == error[e]){
                 e++;
                 if(e == error_length){
-                    printf("\n");
+                    if(logging){
+                        printf("\n");
+                    }
                     return false;
                 }
             }else{
@@ -82,9 +89,9 @@ bool init_esp_01_client(uart_inst_t *uart, uint enable_pin){
         gpio_set_function(5, GPIO_FUNC_UART);
     }
 
-    bool result1 = sendAT(uart, "AT+RST", "ready", 500);
-    bool result2 = sendAT(uart, "AT+CWMODE=1", "OK", 500);
-    bool result3 = sendAT(uart, "AT+CWLAP", "OK", 5000);
+    bool result1 = sendAT(uart, "AT+RST", "ready", 500, true);
+    bool result2 = sendAT(uart, "AT+CWMODE=1", "OK", 500, true);
+    bool result3 = sendAT(uart, "AT+CWLAP", "OK", 5000, true);
 
     return result1 && result2 && result3;
 }
@@ -102,7 +109,7 @@ bool esp_01_connect_wifi(uart_inst_t *uart, char *wifi_name, char *wifi_password
 
     // sendAT(uart1, "AT+CWJAP=\"Stofa70521\",\"bis56lage63\"\r\n", "OK");
 
-    return  sendAT(uart1, connect_command, "OK", 20000);
+    return  sendAT(uart1, connect_command, "OK", 20000, true);
 }
 
 int numPlaces (int n) {
@@ -135,7 +142,7 @@ bool esp_01_send_http(uart_inst_t *uart, char *ADDRESS, char *PORT, char *comman
     strcat(connect_server, "\",");
     strcat(connect_server, PORT);
  
-    sendAT(uart, connect_server, "OK", 2000);
+    sendAT(uart, connect_server, "OK", 2000, false);
 
     // send how many bytes the message will be
     // sendAT(uart1, "AT+CIPSEND=45", "OK");
@@ -152,12 +159,12 @@ bool esp_01_send_http(uart_inst_t *uart, char *ADDRESS, char *PORT, char *comman
 
     strcat(bytes_command, "AT+CIPSEND=");
     strcat(bytes_command, number);
-    sendAT(uart, bytes_command, "OK", 2000);
+    sendAT(uart, bytes_command, "OK", 2000, false);
 
     // send the actual command
     // sendAT(uart, "GET /users HTTP/1.1\r\nHost: 192.168.87.178\r\n", "CLOSED");
 
-    sendAT(uart, command, "CLOSED", 10000);
-
+    sendAT(uart, command, "CLOSED", 10000, false);
+    printf("Transmission sent\n");
     return true;
 }

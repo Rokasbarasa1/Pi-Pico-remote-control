@@ -143,10 +143,10 @@ int main() {
         }
         
         gpio_put(2, 1);
-        sleep_ms(1000);
+        sleep_ms(100);
 
         gpio_put(2, 0);
-        sleep_ms(1000);
+        sleep_ms(100);
     }
 }
 
