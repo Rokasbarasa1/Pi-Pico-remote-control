@@ -10,9 +10,8 @@ bool sendAT(uart_inst_t *uart, char *command , char *ack, uint timeout_ms, bool 
     strcat(command_result, "\r\n");
 
     uart_puts(uart, command_result);
-    // free(command_result);
+
     // dont waste read attempts while nothing is there
-    // while (!uart_is_readable(uart));
     if(!uart_is_readable_within_us(uart, timeout_ms*1000)){
         return false;
     }
@@ -73,7 +72,7 @@ bool sendAT(uart_inst_t *uart, char *command , char *ack, uint timeout_ms, bool 
     return false;
 }
 
-bool init_esp_01_client(uart_inst_t *uart, uint enable_pin){
+bool init_esp_01_client(uart_inst_t *uart, uint enable_pin, bool logging){
 
     // enable the device 
     gpio_init(enable_pin);
@@ -89,14 +88,15 @@ bool init_esp_01_client(uart_inst_t *uart, uint enable_pin){
         gpio_set_function(5, GPIO_FUNC_UART);
     }
 
-    bool result1 = sendAT(uart, "AT+RST", "ready", 500, true);
-    bool result2 = sendAT(uart, "AT+CWMODE=1", "OK", 500, true);
-    bool result3 = sendAT(uart, "AT+CWLAP", "OK", 5000, true);
+    bool result1 = sendAT(uart, "AT+RELOAD", "ready", 20000, logging);
+    bool result2 = sendAT(uart, "AT+RST", "ready", 500, logging);
+    bool result3 = sendAT(uart, "AT+CWMODE=1", "OK", 500, logging);
+    bool result4 = sendAT(uart, "AT+CWLAP", "OK", 5000, logging);
 
-    return result1 && result2 && result3;
+    return result1 && result2 && result3 && result4;
 }
 
-bool esp_01_connect_wifi(uart_inst_t *uart, char *wifi_name, char *wifi_password){
+bool esp_01_client_connect_wifi(uart_inst_t *uart, char *wifi_name, char *wifi_password, bool logging){
     uint connect_command_length = strlen(wifi_name) + strlen(wifi_password) + 14;
     char connect_command[connect_command_length];
     memset(connect_command, 0, connect_command_length * sizeof(char));
@@ -109,7 +109,7 @@ bool esp_01_connect_wifi(uart_inst_t *uart, char *wifi_name, char *wifi_password
 
     // sendAT(uart1, "AT+CWJAP=\"Stofa70521\",\"bis56lage63\"\r\n", "OK");
 
-    return  sendAT(uart1, connect_command, "OK", 20000, true);
+    return sendAT(uart1, connect_command, "OK", 20000, logging);
 }
 
 int numPlaces (int n) {
@@ -128,7 +128,7 @@ int numPlaces (int n) {
     return 10;
 }
 
-bool esp_01_send_http(uart_inst_t *uart, char *ADDRESS, char *PORT, char *command){
+bool esp_01_client_send_http(uart_inst_t *uart, char *ADDRESS, char *PORT, char *command, bool logging){
 
     // connect to the server
     // sendAT(uart1, "AT+CIPSTART=\"TCP\",\"192.168.87.178\",4000", "OK");
@@ -142,7 +142,7 @@ bool esp_01_send_http(uart_inst_t *uart, char *ADDRESS, char *PORT, char *comman
     strcat(connect_server, "\",");
     strcat(connect_server, PORT);
  
-    sendAT(uart, connect_server, "OK", 2000, false);
+    bool result1 = sendAT(uart, connect_server, "OK", 2000, logging);
 
     // send how many bytes the message will be
     // sendAT(uart1, "AT+CIPSEND=45", "OK");
@@ -159,12 +159,11 @@ bool esp_01_send_http(uart_inst_t *uart, char *ADDRESS, char *PORT, char *comman
 
     strcat(bytes_command, "AT+CIPSEND=");
     strcat(bytes_command, number);
-    sendAT(uart, bytes_command, "OK", 2000, false);
+    bool result2 = sendAT(uart, bytes_command, "OK", 2000, logging);
 
     // send the actual command
     // sendAT(uart, "GET /users HTTP/1.1\r\nHost: 192.168.87.178\r\n", "CLOSED");
 
-    sendAT(uart, command, "CLOSED", 10000, false);
-    printf("Transmission sent\n");
-    return true;
+    bool result3 = sendAT(uart, command, "CLOSED", 10000, logging);
+    return result1 && result2 && result3;
 }

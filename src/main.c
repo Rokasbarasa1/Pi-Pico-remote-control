@@ -100,8 +100,9 @@ char* generate_message_joystick(uint x, uint y, char *ADDRESS){
 // esp 01
 int main() {
     stdio_init_all();
-    
-    // led
+    printf("STARTING PROGRAM\n");
+
+    // status led
     gpio_init(2);
     gpio_set_dir(2, GPIO_OUT);
     gpio_put(2, 1);
@@ -114,67 +115,59 @@ int main() {
     init_joystick(26,27,22, button_callback);
 
     // init esp 01
-    init_esp_01_client(uart1, 3);
-    // esp_01_connect_wifi(uart1, wifi_name, wifi_password);
-    // esp_01_send_http(
-    //     uart1, 
-    //     server_ip, 
-    //     server_port, 
-    //     "GET /users HTTP/1.1\r\nHost: 192.168.8.1\r\n"
-    // );
+    init_esp_01_client(uart1, 3, false);
+    
+    bool connected = false;
+    while (!connected){
+        connected = esp_01_client_connect_wifi(uart1, wifi_name, wifi_password, false);
+        if(!connected){
+            printf("FAILED TO CONNECT\n");
+            sleep_ms(2000);
+        }
+    }
+    printf("CONNECTED TO WIFI\n");
+    
 
+    uint x_previous = 0;
+    uint y_previous = 0;
+    uint x = 1;
+    uint y = 1;
 
+    printf("\n\n====START OF LOOP====\n\n");
     while (true) {
         if(send_data){
-            char *string = generate_message_joystick((uint)get_x_percentage(), (uint)get_y_percentage(), server_ip);
-            printf(string);
-            esp_01_send_http(
-                uart1, 
-                server_ip, 
-                server_port, 
-                string
-            );
+            x = (uint)get_x_percentage();
+            y = (uint)get_y_percentage();
 
+            if( x != x_previous || y != y_previous){
+                printf("\nCurrent x: %d\n", (uint)get_x_percentage());
+                printf("Current y: %d\n", (uint)get_y_percentage());
             
-            free(string);
+                x_previous = x;
+                y_previous = y;
 
-            printf("\nCurrent x: %d\n", (uint)get_x_percentage());
-            printf("Current y: %d\n", (uint)get_y_percentage());
+                char *string = generate_message_joystick((uint)get_x_percentage(), (uint)get_y_percentage(), server_ip);
+                bool result = esp_01_client_send_http(
+                    uart1, 
+                    server_ip, 
+                    server_port, 
+                    string,
+                    false
+                );
+                free(string);
+
+                if(result){
+                    printf("Transmission: OK\n");
+                }else{
+                    printf("Transmission: ERROR\n");
+                }
+            }   
         }
         
         gpio_put(2, 1);
-        sleep_ms(100);
+        sleep_ms(30);
 
         gpio_put(2, 0);
-        sleep_ms(100);
+        sleep_ms(30);
     }
 }
-
-// esp_01_send_http(
-//     uart1, 
-//     server_ip, 
-//     server_port, 
-//     "GET / HTTP/1.1\r\nHost: 192.168.87.178\r\n"
-// );
-
-// Blink led and print to serial monitor
-// #include "pico/stdlib.h"
-// #include <stdio.h>
-
-// int main() {
-//     stdio_init_all();
-//     const uint LED_PIN = PICO_DEFAULT_LED_PIN;
-    
-//     gpio_init(LED_PIN);
-//     gpio_set_dir(LED_PIN, GPIO_OUT);
-
-//     while (true) {
-//         gpio_put(LED_PIN, 1);
-//         sleep_ms(100);
-//         printf("ON\n");
-
-//         gpio_put(LED_PIN, 0);
-//         sleep_ms(100);
-//         printf("OFF\n");
-//     }
-// }
