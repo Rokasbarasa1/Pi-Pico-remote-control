@@ -100,7 +100,6 @@ char* generate_message_joystick(uint x, uint y, char *ADDRESS){
 // esp 01
 int main() {
     stdio_init_all();
-    printf("STARTING PROGRAM\n");
 
     // status led
     gpio_init(2);
@@ -109,7 +108,8 @@ int main() {
 
     // sleep because the program executes too quick
     // and doesn't cache what is sent
-    sleep_ms(5000);
+    // sleep_ms(5000);
+    printf("STARTING PROGRAM\n");
 
     // init joystick
     init_joystick(26,27,22, button_callback);
@@ -133,6 +133,9 @@ int main() {
     uint x = 1;
     uint y = 1;
 
+    uint error_count = 0;
+    uint error_count_limit = 10;
+
     printf("\n\n====START OF LOOP====\n\n");
     while (true) {
         if(send_data){
@@ -140,8 +143,10 @@ int main() {
             y = (uint)get_y_percentage();
 
             if( x != x_previous || y != y_previous){
-                printf("\nCurrent x: %d\n", (uint)get_x_percentage());
-                printf("Current y: %d\n", (uint)get_y_percentage());
+                printf("\nCurrent x \%: %d\n", (uint)get_x_percentage());
+                printf("Current y \%: %d\n", (uint)get_y_percentage());
+                // printf("\nCurrent x: %d\n", (uint)get_x());
+                // printf("Current y: %d\n", (uint)get_y());
             
                 x_previous = x;
                 y_previous = y;
@@ -156,10 +161,26 @@ int main() {
                 );
                 free(string);
 
+                // check the connection
                 if(result){
                     printf("Transmission: OK\n");
                 }else{
                     printf("Transmission: ERROR\n");
+                    error_count++;
+                    if(error_count == error_count_limit){
+                        printf("Transmission: Trying to reconnect\n");
+                        connected = false;
+                        send_data = false;
+                        error_count = 0;
+                        while (!connected){
+                            connected = esp_01_client_connect_wifi(uart1, wifi_name, wifi_password, false);
+                            if(!connected){
+                                printf("FAILED TO CONNECT\n");
+                                sleep_ms(2000);
+                            }
+                        }
+                        printf("CONNECTED TO WIFI\n");
+                    }
                 }
             }   
         }
