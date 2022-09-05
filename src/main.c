@@ -7,12 +7,6 @@
 #include "../lib/esp_01/esp_01.h"
 #include "../lib/joystick/joystick.h"
 
-// should put in defines
-// char *wifi_name = "Stofa70521";
-// char *wifi_password = "bis56lage63";
-// char *server_ip = "192.168.87.178";
-// char *server_port = "4000";
-
 
 char *wifi_name = "ESP32_wifi";
 char *wifi_password = "1234567890";
