@@ -5,6 +5,7 @@
         "interrupt.h": "c",
         "time.h": "c",
         "stdio.h": "c",
-        "joystick.h": "c"
+        "joystick.h": "c",
+        "spi.h": "c"
     }
 }

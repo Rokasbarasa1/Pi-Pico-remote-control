@@ -6,13 +6,7 @@
 
 #include "../lib/esp_01/esp_01.h"
 #include "../lib/joystick/joystick.h"
-
-// should put in defines
-// char *wifi_name = "Stofa70521";
-// char *wifi_password = "bis56lage63";
-// char *server_ip = "192.168.87.178";
-// char *server_port = "4000";
-
+#include "../lib/adxl345/adxl345.h"
 
 char *wifi_name = "ESP32_wifi";
 char *wifi_password = "1234567890";
@@ -24,6 +18,111 @@ volatile bool send_data = false;
 void button_callback(){
     printf("\nCALLED\n");
     send_data = !send_data;
+}
+
+char* int_to_string(uint number);
+char* generate_message_joystick(uint x, uint y, char *ADDRESS);
+
+
+// esp 01
+int main() {
+    stdio_init_all();
+
+    // status led
+    gpio_init(2);
+    gpio_set_dir(2, GPIO_OUT);
+    gpio_put(2, 1);
+
+    // sleep because the program executes too quick
+    // and doesn't cache what is sent
+    sleep_ms(2500);
+    printf("STARTING PROGRAM\n");
+
+    init_joystick(26,27,22, button_callback);
+
+    bool adxl345_setup = adxl345_init(spi_default, 6, true);
+
+    if( adxl345_setup){
+        printf("adxl345 setup succeeded\n");
+    }else{
+        printf("adxl345 setup failed\n");
+    }
+    // init_esp_01_client(uart1, 3, false);
+    
+    bool connected = false;
+    // while (!connected){
+    //     connected = esp_01_client_connect_wifi(uart1, wifi_name, wifi_password, false);
+    //     if(!connected){
+    //         printf("FAILED TO CONNECT\n");
+    //         sleep_ms(2000);
+    //     }
+    // }
+    printf("CONNECTED TO WIFI\n");
+    
+
+    uint x_previous = 0;
+    uint y_previous = 0;
+    uint x = 1;
+    uint y = 1;
+
+    uint error_count = 0;
+    uint error_count_limit = 10;
+
+    printf("\n\n====START OF LOOP====\n\n");
+    while (true) {
+        if(send_data){
+            x = (uint)get_x_percentage();
+            y = (uint)get_y_percentage();
+
+            // if( x != x_previous || y != y_previous){
+            //     printf("\nCurrent x \%: %d\n", (uint)get_x_percentage());
+            //     printf("Current y \%: %d\n", (uint)get_y_percentage());
+            //     // printf("\nCurrent x: %d\n", (uint)get_x());
+            //     // printf("Current y: %d\n", (uint)get_y());
+            
+            //     x_previous = x;
+            //     y_previous = y;
+
+            //     char *string = generate_message_joystick((uint)get_x_percentage(), (uint)get_y_percentage(), server_ip);
+            //     bool result = esp_01_client_send_http(
+            //         uart1, 
+            //         server_ip, 
+            //         server_port, 
+            //         string,
+            //         false
+            //     );
+            //     free(string);
+
+            //     // check the connection
+            //     if(result){
+            //         printf("Transmission: OK\n");
+            //     }else{
+            //         printf("Transmission: ERROR\n");
+            //         error_count++;
+            //         if(error_count == error_count_limit){
+            //             printf("Transmission: Trying to reconnect\n");
+            //             connected = false;
+            //             // send_data = false;
+            //             error_count = 0;
+            //             while (!connected){
+            //                 connected = esp_01_client_connect_wifi(uart1, wifi_name, wifi_password, false);
+            //                 if(!connected){
+            //                     printf("FAILED TO CONNECT\n");
+            //                     sleep_ms(2000);
+            //                 }
+            //             }
+            //             printf("CONNECTED TO WIFI\n");
+            //         }
+            //     }
+            // }   
+        }
+        
+        gpio_put(2, 1);
+        sleep_ms(30);
+
+        gpio_put(2, 0);
+        sleep_ms(30);
+    }
 }
 
 char* int_to_string(uint number){
@@ -95,100 +194,4 @@ char* generate_message_joystick(uint x, uint y, char *ADDRESS){
     string[connection_length] = '\0';
 
     return string;
-}
-
-// esp 01
-int main() {
-    stdio_init_all();
-
-    // status led
-    gpio_init(2);
-    gpio_set_dir(2, GPIO_OUT);
-    gpio_put(2, 1);
-
-    // sleep because the program executes too quick
-    // and doesn't cache what is sent
-    // sleep_ms(5000);
-    printf("STARTING PROGRAM\n");
-
-    // init joystick
-    init_joystick(26,27,22, button_callback);
-
-    // init esp 01
-    init_esp_01_client(uart1, 3, false);
-    
-    bool connected = false;
-    while (!connected){
-        connected = esp_01_client_connect_wifi(uart1, wifi_name, wifi_password, false);
-        if(!connected){
-            printf("FAILED TO CONNECT\n");
-            sleep_ms(2000);
-        }
-    }
-    printf("CONNECTED TO WIFI\n");
-    
-
-    uint x_previous = 0;
-    uint y_previous = 0;
-    uint x = 1;
-    uint y = 1;
-
-    uint error_count = 0;
-    uint error_count_limit = 10;
-
-    printf("\n\n====START OF LOOP====\n\n");
-    while (true) {
-        if(send_data){
-            x = (uint)get_x_percentage();
-            y = (uint)get_y_percentage();
-
-            if( x != x_previous || y != y_previous){
-                printf("\nCurrent x \%: %d\n", (uint)get_x_percentage());
-                printf("Current y \%: %d\n", (uint)get_y_percentage());
-                // printf("\nCurrent x: %d\n", (uint)get_x());
-                // printf("Current y: %d\n", (uint)get_y());
-            
-                x_previous = x;
-                y_previous = y;
-
-                char *string = generate_message_joystick((uint)get_x_percentage(), (uint)get_y_percentage(), server_ip);
-                bool result = esp_01_client_send_http(
-                    uart1, 
-                    server_ip, 
-                    server_port, 
-                    string,
-                    false
-                );
-                free(string);
-
-                // check the connection
-                if(result){
-                    printf("Transmission: OK\n");
-                }else{
-                    printf("Transmission: ERROR\n");
-                    error_count++;
-                    if(error_count == error_count_limit){
-                        printf("Transmission: Trying to reconnect\n");
-                        connected = false;
-                        send_data = false;
-                        error_count = 0;
-                        while (!connected){
-                            connected = esp_01_client_connect_wifi(uart1, wifi_name, wifi_password, false);
-                            if(!connected){
-                                printf("FAILED TO CONNECT\n");
-                                sleep_ms(2000);
-                            }
-                        }
-                        printf("CONNECTED TO WIFI\n");
-                    }
-                }
-            }   
-        }
-        
-        gpio_put(2, 1);
-        sleep_ms(30);
-
-        gpio_put(2, 0);
-        sleep_ms(30);
-    }
 }
