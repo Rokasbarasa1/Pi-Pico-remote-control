@@ -7,6 +7,7 @@
 #include "../lib/esp_01/esp_01.h"
 #include "../lib/joystick/joystick.h"
 #include "../lib/adxl345/adxl345.h"
+#include "../lib/nrf24l01/nrf24l01.h"
 
 char *wifi_name = "ESP32_wifi";
 char *wifi_password = "1234567890";
@@ -40,13 +41,22 @@ int main() {
 
     init_joystick(26,27,22, button_callback);
 
-    bool adxl345_setup = adxl345_init(spi_default, 6, true);
+    // bool adxl345_setup = adxl345_init(spi_default, 6, true);
+    bool nrf24_setup = nrf24_init(spi_default, 7, 8, true);
 
-    if( adxl345_setup){
-        printf("adxl345 setup succeeded\n");
+
+    // if(adxl345_setup){
+    //     printf("adxl345 setup succeeded\n");
+    // }else{
+    //     printf("adxl345 setup failed\n");
+    // }
+
+    if(nrf24_setup){
+        printf("nrf24 setup succeeded\n");
     }else{
-        printf("adxl345 setup failed\n");
+        printf("nrf24 setup failed\n");
     }
+
     // init_esp_01_client(uart1, 3, false);
     
     bool connected = false;

@@ -7,19 +7,19 @@
 volatile uint cs_pin = 0;
 volatile spi_inst_t *spi = NULL;
 
-void cs_deselect(){
+static void cs_deselect(){
     asm volatile("nop \n nop \n nop");
     gpio_put(cs_pin, 1);
     asm volatile("nop \n nop \n nop");
 }
 
-void cs_select(){
+static void cs_select(){
     asm volatile("nop \n nop \n nop");
     gpio_put(cs_pin, 0);
     asm volatile("nop \n nop \n nop");
 }
 
-void write_register(uint8_t reg, uint8_t data) {
+static void write_register(uint8_t reg, uint8_t data) {
 
     reg &= SPIBUS_WRITE;
 
@@ -35,7 +35,7 @@ void write_register(uint8_t reg, uint8_t data) {
     cs_deselect();
 }
 
-void read_registers(uint8_t reg, uint8_t *buf, uint16_t len) {
+static void read_registers(uint8_t reg, uint8_t *buf, uint16_t len) {
     // For this particular device, we send the device the register we want to read
     // first, then subsequently read from the device. The register is auto incrementing
     // so we don't need to keep sending the register we want, just the first.
@@ -56,9 +56,6 @@ bool adxl345_test(){
     
     write_register(0x1E, 0b00000000);
     write_register(0x1E, 0b00000000); // For some reason i need to write twice to this
-    // write_register(0x1E, 0b00000000);
-    // write_register(0x1E, 0b00000000);
-    // write_register(0x1E, 0b00000000);
 
         
     uint8_t data[1] = {0};
@@ -88,14 +85,6 @@ bool adxl345_test(){
     }
 
     return true;
-    // uint8_t data[1] = {0};
-    // read_registers(0x00, data, 1);
-
-    // if(data[0] != 229){ // device id should be 229
-    //     return false;
-    // }else{
-    //     return true;
-    // }
 }
 
 // This library is not a work in progress as i wont use it on the pi pico 

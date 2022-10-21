@@ -6,6 +6,8 @@
         "time.h": "c",
         "stdio.h": "c",
         "joystick.h": "c",
-        "spi.h": "c"
+        "spi.h": "c",
+        "nrf24l01.h": "c",
+        "adxl345.h": "c"
     }
 }
