@@ -145,7 +145,10 @@ int main() {
 
             printf("The data: %s\n", ((char*) rx_data));
             gpio_put(2, 1);
+        }else{
+            printf("\n");
         }
+
 
         // printf("Transmitting: ");
         // if(nrf24_transmit(tx_data)){
