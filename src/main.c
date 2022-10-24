@@ -41,21 +41,27 @@ int main() {
 
     init_joystick(26,27,22, button_callback);
 
-    // bool adxl345_setup = adxl345_init(spi_default, 6, true);
+    bool adxl345_setup = adxl345_init(spi_default, 6, true);
     bool nrf24_setup = nrf24_init(spi_default, 7, 8, true);
 
 
-    // if(adxl345_setup){
-    //     printf("adxl345 setup succeeded\n");
-    // }else{
-    //     printf("adxl345 setup failed\n");
-    // }
+    if(adxl345_setup){
+        printf("adxl345 setup succeeded\n");
+    }else{
+        printf("adxl345 setup failed\n");
+    }
 
     if(nrf24_setup){
         printf("nrf24 setup succeeded\n");
     }else{
         printf("nrf24 setup failed\n");
     }
+
+    uint8_t tx_address[5] = {0xEE, 0xDD, 0xCC, 0xBB, 0xAA};
+    uint8_t tx_data[] = "hello world!\n";
+
+    // nrf24_tx_mode(tx_address, 10);
+    nrf24_rx_mode(tx_address, 10);
 
     // init_esp_01_client(uart1, 3, false);
     
@@ -77,7 +83,7 @@ int main() {
 
     uint error_count = 0;
     uint error_count_limit = 10;
-
+    uint8_t rx_data[32];
     printf("\n\n====START OF LOOP====\n\n");
     while (true) {
         if(send_data){
@@ -127,11 +133,32 @@ int main() {
             // }   
         }
         
-        gpio_put(2, 1);
-        sleep_ms(30);
 
+        printf("Receiving: ");
+        if(nrf24_data_available(1)){
+            nrf24_receive(rx_data);
+            printf("The data: ");
+            for(uint8_t i = 0; i < strlen((char*) rx_data); i++ ){
+                printf("%c", ((char*) rx_data)[i]);
+            }
+            printf("\n");
+
+            printf("The data: %s\n", ((char*) rx_data));
+            gpio_put(2, 1);
+        }
+
+        // printf("Transmitting: ");
+        // if(nrf24_transmit(tx_data)){
+        //     printf("TX success\n");
+        //     gpio_put(2, 1);
+        // }else{
+        //     printf("TX failed\n");
+        // }
+
+
+        sleep_ms(500);
         gpio_put(2, 0);
-        sleep_ms(30);
+        sleep_ms(500);
     }
 }
 

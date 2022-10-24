@@ -60,7 +60,7 @@ bool adxl345_test(){
         
     uint8_t data[1] = {0};
     read_registers(0x00, data, 1);
-    printf("%d\n", data[0]);
+    // printf("%d\n", data[0]);
 
     if(data[0] != 229){ // device id should be 229
         return false;
@@ -68,7 +68,7 @@ bool adxl345_test(){
 
     uint8_t data2[1] = {0};
     read_registers(0x1E, data2, 1);
-    printf("%d\n", data2[0]);
+    // printf("%d\n", data2[0]);
 
     if(data2[0] != 0){ // device id should be 229
         return false;
@@ -78,7 +78,7 @@ bool adxl345_test(){
 
     uint8_t data1[1] = {0};
     read_registers(0x1E, data1, 1);
-    printf("%d\n\n", data1[0]);
+    // printf("%d\n\n", data1[0]);
 
     if(data1[0] != 170){ // device id should be 229
         return false;
