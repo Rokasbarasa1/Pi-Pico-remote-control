@@ -22,8 +22,8 @@ void button_callback(){
 }
 
 char* int_to_string(uint number);
-char* generate_message_joystick(uint x, uint y, char *ADDRESS);
-
+char* generate_message_joystick_esp01(uint x, uint y, char *ADDRESS);
+char* generate_message_joystick_nrf24(uint x, uint y);
 
 // esp 01
 int main() {
@@ -40,16 +40,7 @@ int main() {
     printf("STARTING PROGRAM\n");
 
     init_joystick(26,27,22, button_callback);
-
-    bool adxl345_setup = adxl345_init(spi_default, 6, true);
     bool nrf24_setup = nrf24_init(spi_default, 7, 8, true);
-
-
-    if(adxl345_setup){
-        printf("adxl345 setup succeeded\n");
-    }else{
-        printf("adxl345 setup failed\n");
-    }
 
     if(nrf24_setup){
         printf("nrf24 setup succeeded\n");
@@ -58,25 +49,11 @@ int main() {
     }
 
     uint8_t tx_address[5] = {0xEE, 0xDD, 0xCC, 0xBB, 0xAA};
-    uint8_t tx_data[] = "hello world!\n";
     uint8_t rx_data[32];
+    uint8_t tx_data[] = "hello world!\n";
 
     nrf24_tx_mode(tx_address, 10);
-    // nrf24_rx_mode(tx_address, 10);
-
-    // init_esp_01_client(uart1, 3, false);
     
-    bool connected = false;
-    // while (!connected){
-    //     connected = esp_01_client_connect_wifi(uart1, wifi_name, wifi_password, false);
-    //     if(!connected){--
-    //         printf("FAILED TO CONNECT\n");
-    //         sleep_ms(2000);
-    //     }
-    // }
-    printf("CONNECTED TO WIFI\n");
-    
-
     uint x_previous = 0;
     uint y_previous = 0;
     uint x = 1;
@@ -90,75 +67,24 @@ int main() {
             x = (uint)get_x_percentage();
             y = (uint)get_y_percentage();
 
-            // if( x != x_previous || y != y_previous){
-            //     printf("\nCurrent x \%: %d\n", (uint)get_x_percentage());
-            //     printf("Current y \%: %d\n", (uint)get_y_percentage());
-            //     // printf("\nCurrent x: %d\n", (uint)get_x());
-            //     // printf("Current y: %d\n", (uint)get_y());
+            if( x != x_previous || y != y_previous){
+                // printf("\nCurrent x \%: %d\n", (uint)get_x_percentage());
+                // printf("Current y \%: %d\n", (uint)get_y_percentage());
             
-            //     x_previous = x;
-            //     y_previous = y;
+                x_previous = x;
+                y_previous = y;
 
-            //     char *string = generate_message_joystick((uint)get_x_percentage(), (uint)get_y_percentage(), server_ip);
-            //     bool result = esp_01_client_send_http(
-            //         uart1, 
-            //         server_ip, 
-            //         server_port, 
-            //         string,
-            //         false
-            //     );
-            //     free(string);
-
-            //     // check the connection
-            //     if(result){
-            //         printf("Transmission: OK\n");
-            //     }else{
-            //         printf("Transmission: ERROR\n");
-            //         error_count++;
-            //         if(error_count == error_count_limit){
-            //             printf("Transmission: Trying to reconnect\n");
-            //             connected = false;
-            //             // send_data = false;
-            //             error_count = 0;
-            //             while (!connected){
-            //                 connected = esp_01_client_connect_wifi(uart1, wifi_name, wifi_password, false);
-            //                 if(!connected){
-            //                     printf("FAILED TO CONNECT\n");
-            //                     sleep_ms(2000);
-            //                 }
-            //             }
-            //             printf("CONNECTED TO WIFI\n");
-            //         }
-            //     }
-            // }   
+                char *string = generate_message_joystick_nrf24((uint)get_x_percentage(), (uint)get_y_percentage());
+                if(nrf24_transmit(string)){
+                    gpio_put(2, 1);
+                }else{
+                }
+                free(string);
+            }   
         }
         
-
-        printf("Receiving: ");
-        if(nrf24_data_available(1)){
-            nrf24_receive(rx_data);
-            for(uint8_t i = 0; i < strlen((char*) rx_data); i++ ){
-                printf("%c", ((char*) rx_data)[i]);
-            }
-            printf("\n");
-
-        }else{
-            printf("no data\n");
-        }
-
-
-        printf("Transmitting: ");
-        if(nrf24_transmit(tx_data)){
-            printf("TX success\n");
-            gpio_put(2, 1);
-        }else{
-            printf("TX failed\n");
-        }
-
-
-        sleep_ms(500);
+        sleep_ms(30);
         gpio_put(2, 0);
-        sleep_ms(500);
     }
 }
 
@@ -204,7 +130,7 @@ char* int_to_string(uint number){
     return string;
 }
 
-char* generate_message_joystick(uint x, uint y, char *ADDRESS){
+char* generate_message_joystick_esp01(uint x, uint y, char *ADDRESS){
     char* x_str = int_to_string(x);
     char* y_str = int_to_string(y);
 
@@ -219,6 +145,32 @@ char* generate_message_joystick(uint x, uint y, char *ADDRESS){
     strcat(connection, " HTTP/1.1\r\nHost: ");
     strcat(connection, ADDRESS);
     strcat(connection, "\r\n");
+
+    free(x_str);
+    free(y_str);
+
+    char *string = malloc(connection_length+1);
+
+    for(uint8_t i = 0; i < connection_length-1; i++){
+        string[i] = connection[i];
+    }
+    string[connection_length] = '\0';
+
+    return string;
+}
+
+char* generate_message_joystick_nrf24(uint x, uint y){
+    char* x_str = int_to_string(x);
+    char* y_str = int_to_string(y);
+
+    uint connection_length = strlen("//") + strlen(x_str) + strlen(y_str);
+    char connection[connection_length];
+    memset(connection, 0, connection_length * sizeof(char));
+
+    strcat(connection, "/");
+    strcat(connection, x_str);
+    strcat(connection, "/");
+    strcat(connection, y_str);
 
     free(x_str);
     free(y_str);
