@@ -74,11 +74,15 @@ static uint8_t read_register(uint8_t reg) {
 }
 
 // write multiple bytes to register
-static void write_register_multiple(uint8_t reg, uint8_t * data, uint size) {
+static void write_register_multiple(uint8_t reg, uint8_t * data, uint size, bool command) {
     set_spi_settings();
 
-    reg |= SPIBUS_WRITE;
-    uint8_t buf[1] = { reg & 0x7f };
+    uint8_t buf[1];
+    if(!command){
+        reg |= SPIBUS_WRITE;
+        reg = (reg & 0x7f);
+    }
+    buf[0] = reg;
 
     cs_select();
     spi_write_blocking(spi_default, buf, 1);
@@ -133,52 +137,6 @@ bool nrf24_test(){
     return true;
 }
 
-bool nrf24_init(spi_inst_t *spi_temp, uint pin_csn_temp, uint pin_ce_temp, bool init_spi){
-    csn_pin = pin_csn_temp;
-    ce_pin = pin_ce_temp;
-    spi = spi_temp;
-
-    if(init_spi){
-        spi_init(spi, 500000); // 0.5 Mhz
-
-        // set pin functons to default spi
-        gpio_set_function(PICO_DEFAULT_SPI_RX_PIN, GPIO_FUNC_SPI);
-        gpio_set_function(PICO_DEFAULT_SPI_SCK_PIN, GPIO_FUNC_SPI);
-        gpio_set_function(PICO_DEFAULT_SPI_TX_PIN, GPIO_FUNC_SPI);
-    }
-
-    // init cs pin and set it to high to make the device not be selected 
-    gpio_init(csn_pin);
-    gpio_set_dir(csn_pin, GPIO_OUT); // Outputs
-    cs_deselect();
-
-    gpio_init(ce_pin);
-    gpio_set_dir(ce_pin, GPIO_OUT); // Outputs
-    ce_disable(); // disable to start changing registers on nrf24
-
-    if(!nrf24_test()){ // test if spi works
-        return false;
-    }
-
-
-    write_register(CONFIG, 0b00000010);// Will come back
-    printf("CONFIG "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(CONFIG)));
-    write_register(EN_AA, 0b00000000); // No auto ACK
-    printf("EN_AA "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(EN_AA)));
-    write_register(EN_RXADDR, 0b00000000); // Will come back
-    printf("EN_RXADDR "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(EN_RXADDR)));
-    write_register(SETUP_AW, 0b00000011); // 5 bytes rx/tx address field
-    printf("SETUP_AW "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(SETUP_AW)));
-    write_register(SETUP_RETR, 0b00000000); // no ACK being used
-    printf("SETUP_RETR "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(SETUP_RETR)));
-    write_register(RF_CH, 0b00000000);   // will come back
-    printf("RF_CH "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(RF_CH)));
-    write_register(RF_SETUP, 0b00001110); // 0db power and data rate 2Mbps
-    printf("RF_SETUP "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(RF_SETUP)));
-
-    ce_enable();
-    return true;
-}
 
 // reset some registers on the nrf24
 void nrf24_reset(uint8_t REG)
@@ -201,15 +159,15 @@ void nrf24_reset(uint8_t REG)
         write_register(OBSERVE_TX, 0x00);
         write_register(CD, 0x00);
         uint8_t rx_addr_p0_def[5] = {0xE7, 0xE7, 0xE7, 0xE7, 0xE7};
-        write_register_multiple(RX_ADDR_P0, rx_addr_p0_def, 5);
+        write_register_multiple(RX_ADDR_P0, rx_addr_p0_def, 5, false);
         uint8_t rx_addr_p1_def[5] = {0xC2, 0xC2, 0xC2, 0xC2, 0xC2};
-        write_register_multiple(RX_ADDR_P1, rx_addr_p1_def, 5);
+        write_register_multiple(RX_ADDR_P1, rx_addr_p1_def, 5, false);
         write_register(RX_ADDR_P2, 0xC3);
         write_register(RX_ADDR_P3, 0xC4);
         write_register(RX_ADDR_P4, 0xC5);
         write_register(RX_ADDR_P5, 0xC6);
         uint8_t tx_addr_def[5] = {0xE7, 0xE7, 0xE7, 0xE7, 0xE7};
-        write_register_multiple(TX_ADDR, tx_addr_def, 5);
+        write_register_multiple(TX_ADDR, tx_addr_def, 5, false);
         write_register(RX_PW_P0, 0);
         write_register(RX_PW_P1, 0);
         write_register(RX_PW_P2, 0);
@@ -229,7 +187,7 @@ void nrf24_tx_mode(uint8_t *address, uint8_t channel){
 
 	write_register(RF_CH, channel);  // select the channel
 
-	write_register_multiple(TX_ADDR, address, 5);  // Write the TX address
+	write_register_multiple(TX_ADDR, address, 5, false);  // Write the TX address
 
 
 	// power up the device
@@ -253,13 +211,21 @@ void nrf24_rx_mode(uint8_t *address, uint8_t channel){
 
     // setup pipe 1
     uint8_t en_rxaddr = read_register(EN_RXADDR);
-	en_rxaddr = en_rxaddr | (1<<1);
-	write_register(EN_RXADDR, en_rxaddr);
-
-    write_register_multiple(RX_ADDR_P1, address, 5);
-
-    write_register(RX_PW_P1, 32);
+	en_rxaddr = en_rxaddr | 0b00000010;
+	write_register(EN_RXADDR, en_rxaddr); // set to use pipe 1
+    write_register_multiple(RX_ADDR_P1, address, 5, false); // write address to pipe 1 address register
+    write_register(RX_PW_P1, 32); // receive 32 bytes
     
+
+    // setup pipe 2
+    // en_rxaddr = read_register(EN_RXADDR);
+	// en_rxaddr = en_rxaddr | (1<<2);
+	// write_register(EN_RXADDR, en_rxaddr);
+    // write_register(RX_ADDR_P2, 0xEE);
+    // write_register(RX_PW_P2, 32);
+
+
+
 
     // dont need pipe 2
 	// // select data pipe 2
@@ -288,12 +254,22 @@ void nrf24_rx_mode(uint8_t *address, uint8_t channel){
 	config = config | (1<<1) | (1<<0);
 	write_register(CONFIG, config);
 
+
+    // uint8_t data[5] = {0,0,0,0,0};
+    // read_register_multiple(RX_ADDR_P1, data, 5);
+
+    // printf("EN_RXADDR "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(data[0]));
+    // printf("EN_RXADDR "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(data[1]));
+    // printf("EN_RXADDR "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(data[2]));
+    // printf("EN_RXADDR "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(data[3]));
+    // printf("EN_RXADDR "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(data[4]));
+
 	ce_enable();
 }
 
 // perform the transmission with specified data
-uint8_t nrf24_transmit(uint8_t *data){
-    write_register_multiple(W_TX_PAYLOAD, data, 32);
+bool nrf24_transmit(uint8_t *data){
+    write_register_multiple(W_TX_PAYLOAD, data, 32, true);
 	sleep_ms(1);
 
 	uint8_t fifo_status = read_register(FIFO_STATUS);
@@ -302,22 +278,23 @@ uint8_t nrf24_transmit(uint8_t *data){
 	if ((fifo_status&(1<<4)) && (!(fifo_status&(1<<3)))){
 		send_command(FLUSH_TX);
 		nrf24_reset(FIFO_STATUS);// reset FIFO_STATUS
-		return 1;
+		return true;
 	}
 
-	return 0;
+	return false;
 }
 
 // Check if data is available on the specified pipe
-uint8_t nrf24_data_available(int pipe_number){
+bool nrf24_data_available(int pipe_number){
 	uint8_t status = read_register(STATUS);
+    printf("STATUS "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(status));
 
 	if ((status&(1<<6))&&(status&(pipe_number<<1))){
 		write_register(STATUS, (1<<6));
-		return 1;
+		return true;
 	}
 
-	return 0;
+	return false;
 }
 
 // receive the data form the nrf24 into the specified array
@@ -349,3 +326,89 @@ void nrf24_read_all(uint8_t *data){
 		*(data+i) = read_register(i-12);
 	}
 }
+
+bool nrf24_init(spi_inst_t *spi_temp, uint pin_csn_temp, uint pin_ce_temp, bool init_spi){
+    csn_pin = pin_csn_temp;
+    ce_pin = pin_ce_temp;
+    spi = spi_temp;
+
+    if(init_spi){
+        spi_init(spi, 500000); // 0.5 Mhz
+
+        // set pin functons to default spi
+        gpio_set_function(PICO_DEFAULT_SPI_RX_PIN, GPIO_FUNC_SPI);
+        gpio_set_function(PICO_DEFAULT_SPI_SCK_PIN, GPIO_FUNC_SPI);
+        gpio_set_function(PICO_DEFAULT_SPI_TX_PIN, GPIO_FUNC_SPI);
+    }
+
+    // init cs pin and set it to high to make the device not be selected 
+    gpio_init(csn_pin);
+    gpio_set_dir(csn_pin, GPIO_OUT); // Outputs
+    cs_deselect();
+
+    gpio_init(ce_pin);
+    gpio_set_dir(ce_pin, GPIO_OUT); // Outputs
+    ce_disable(); // disable to start changing registers on nrf24
+
+    if(!nrf24_test()){ // test if spi works
+        return false;
+    }
+
+
+    nrf24_reset(0);
+    write_register(CONFIG, 0b00000010);// Will come back
+    printf("CONFIG "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(CONFIG)));
+    write_register(EN_AA, 0b00000000); // No auto ACK
+    printf("EN_AA "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(EN_AA)));
+    write_register(EN_RXADDR, 0b00000000); // Will come back
+    printf("EN_RXADDR "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(EN_RXADDR)));
+    write_register(SETUP_AW, 0b00000011); // 5 bytes rx/tx address field
+    printf("SETUP_AW "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(SETUP_AW)));
+    write_register(SETUP_RETR, 0b00000000); // no ACK being used
+    printf("SETUP_RETR "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(SETUP_RETR)));
+    write_register(RF_CH, 0b00000000);   // will come back
+    printf("RF_CH "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(RF_CH)));
+    write_register(RF_SETUP, 0b00001110); // 0db power and data rate 2Mbps
+    printf("RF_SETUP "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(RF_SETUP)));
+
+    ce_enable();
+    return true;
+}
+
+//Examples
+
+// If both receive and transmit are on the same address and pipe 1 then this should work 
+
+// Receiver
+
+// uint8_t address[5] = {0xEE, 0xDD, 0xCC, 0xBB, 0xAA};
+// uint8_t rx_data[32];
+// bool nrf24_setup = nrf24_init(spi_default, 7, 8, true);
+// nrf24_rx_mode(address, 10);
+
+// printf("Transmitting: ");
+// if(nrf24_transmit(tx_data)){
+//     printf("TX success\n");
+// }else{
+//     printf("TX failed\n");
+// }
+
+
+// Transmitter
+
+// uint8_t address[5] = {0xEE, 0xDD, 0xCC, 0xBB, 0xAA};
+// uint8_t tx_data[] = "hello world!\n";
+// bool nrf24_setup = nrf24_init(spi_default, 7, 8, true);
+// nrf24_tx_mode(address, 10);
+
+// printf("Receiving: ");
+// if(nrf24_data_available(1)){
+//     nrf24_receive(rx_data);
+//     for(uint8_t i = 0; i < strlen((char*) rx_data); i++ ){
+//         printf("%c", ((char*) rx_data)[i]);
+//     }
+//     printf("\n");
+
+// }else{
+//     printf("no data\n");
+// }
