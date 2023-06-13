@@ -21,9 +21,10 @@ void button_callback(){
     send_data = !send_data;
 }
 
-char* int_to_string(uint number);
-char* generate_message_joystick_esp01(uint x, uint y, char *ADDRESS);
-char* generate_message_joystick_nrf24(uint x, uint y);
+unsigned char* int_to_string(uint number);
+unsigned char* generate_message_joystick_esp01(uint x, uint y, unsigned char *ADDRESS);
+unsigned char* generate_message_joystick_nrf24(uint x, uint y);
+bool disable_repeated_send = false;
 
 // esp 01
 int main() {
@@ -67,35 +68,40 @@ int main() {
             x = (uint)get_x_percentage();
             y = (uint)get_y_percentage();
 
-            if( x != x_previous || y != y_previous){
-                // printf("\nCurrent x \%: %d\n", (uint)get_x_percentage());
-                // printf("Current y \%: %d\n", (uint)get_y_percentage());
+            if(x >= 2 && x <= 98){
+                x += 2;
+            }
+
+            if( !disable_repeated_send || x != x_previous || y != y_previous){
+                printf("\nCurrent x: %d\n", x);
+                printf("Current y: %d\n", x);
             
                 x_previous = x;
                 y_previous = y;
 
-                char *string = generate_message_joystick_nrf24((uint)get_x_percentage(), (uint)get_y_percentage());
+                char *string = generate_message_joystick_nrf24(x, y);
                 if(nrf24_transmit(string)){
                     gpio_put(2, 1);
                 }else{
+                    printf("BAD\n");
                 }
                 free(string);
             }   
         }
         
-        sleep_ms(30);
+        sleep_ms(5);
         gpio_put(2, 0);
     }
 }
 
-char* int_to_string(uint number){
+unsigned char* int_to_string(uint number){
     uint8_t negative = 0;
     // if (number < 0){
     //     negative = 1;
     //     number *= -1;
     // }
     if(number == 0){
-        char *string = malloc(2);
+        unsigned char *string = malloc(2);
         string[0] = '0';
         string[1] = '\0'; 
         return string;
@@ -109,7 +115,7 @@ char* int_to_string(uint number){
         count++;  
     }    
 
-    char *string = malloc(count+negative+1);
+    unsigned char *string = malloc(count+negative+1);
     
     for(uint8_t i = 0+negative; i < count+negative; i++){
         uint32_t divisor = 1;
@@ -130,12 +136,12 @@ char* int_to_string(uint number){
     return string;
 }
 
-char* generate_message_joystick_esp01(uint x, uint y, char *ADDRESS){
-    char* x_str = int_to_string(x);
-    char* y_str = int_to_string(y);
+unsigned char* generate_message_joystick_esp01(uint x, uint y, unsigned char *ADDRESS){
+    unsigned char* x_str = int_to_string(x);
+    unsigned char* y_str = int_to_string(y);
 
     uint connection_length = strlen("GET //") + strlen(" HTTP/1.1\r\nHost: ")+ strlen("\r\n") + strlen(ADDRESS) + strlen(x_str) + strlen(y_str);
-    char connection[connection_length];
+    unsigned char connection[connection_length];
     memset(connection, 0, connection_length * sizeof(char));
 
     strcat(connection, "GET /");
@@ -149,7 +155,7 @@ char* generate_message_joystick_esp01(uint x, uint y, char *ADDRESS){
     free(x_str);
     free(y_str);
 
-    char *string = malloc(connection_length+1);
+    unsigned char *string = malloc(connection_length+1);
 
     for(uint8_t i = 0; i < connection_length-1; i++){
         string[i] = connection[i];
@@ -159,13 +165,13 @@ char* generate_message_joystick_esp01(uint x, uint y, char *ADDRESS){
     return string;
 }
 
-char* generate_message_joystick_nrf24(uint x, uint y){
-    char* x_str = int_to_string(x);
-    char* y_str = int_to_string(y);
+unsigned char* generate_message_joystick_nrf24(uint x, uint y){
+    unsigned char* x_str = int_to_string(x);
+    unsigned char* y_str = int_to_string(y);
 
     uint connection_length = strlen("//") + strlen(x_str) + strlen(y_str);
-    char connection[connection_length];
-    memset(connection, 0, connection_length * sizeof(char));
+    unsigned char connection[connection_length];
+    memset(connection, 0, connection_length * sizeof(unsigned char));
 
     strcat(connection, "/");
     strcat(connection, x_str);
@@ -175,7 +181,7 @@ char* generate_message_joystick_nrf24(uint x, uint y){
     free(x_str);
     free(y_str);
 
-    char *string = malloc(connection_length+1);
+    unsigned char *string = malloc(connection_length+1);
 
     for(uint8_t i = 0; i < connection_length-1; i++){
         string[i] = connection[i];

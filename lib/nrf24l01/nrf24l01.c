@@ -22,7 +22,7 @@ static volatile spi_inst_t *spi = NULL;
 void set_spi_settings(){
     // POLARITY AND PHASE HAVE TO BE BOTH 0 IMPORTANT
     spi_set_format(spi, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST); // 8 bits , cpol 0, cpha 0, MSB first
-    spi_set_baudrate(spi, 500000); // 0.5 Mhz
+    spi_set_baudrate(spi, 7000000); // 0.5 Mhz
 }
 
 // Slave deselect equivalent
@@ -268,7 +268,7 @@ void nrf24_rx_mode(uint8_t *address, uint8_t channel){
 }
 
 // perform the transmission with specified data
-bool nrf24_transmit(uint8_t *data){
+bool nrf24_transmit(char *data){
     write_register_multiple(W_TX_PAYLOAD, data, 32, true);
 	sleep_ms(1);
 
