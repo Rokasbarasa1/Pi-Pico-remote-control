@@ -5,8 +5,17 @@
 #include <string.h>
 #include <pico/time.h>
 
-bool init_joystick(uint x_axis_pin, uint y_axis_pin, uint button_pin, void (*button_callback_temp)());
-uint16_t get_x();
-uint16_t get_y();
-float get_x_percentage();
-float get_y_percentage();
+void init_joystick();
+uint16_t joystick_get_throttle();
+uint16_t joystick_get_yaw();
+uint16_t joystick_get_pitch();
+uint16_t joystick_get_roll();
+float joystick_get_throttle_percent();
+float joystick_get_yaw_percent();
+float joystick_get_pitch_percent();
+float joystick_get_roll_percent();
+
+float joystick_get_throttle_volts();
+float joystick_get_yaw_volts();
+float joystick_get_pitch_volts();
+float joystick_get_roll_volts();

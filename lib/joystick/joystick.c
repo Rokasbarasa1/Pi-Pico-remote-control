@@ -1,118 +1,123 @@
 #include "./joystick.h"
 
-volatile uint adc_x = 999;
-volatile uint adc_y = 999;
-volatile uint current_adc = 0;
-struct repeating_timer timer;
-volatile uint16_t current_x = 0;
-volatile uint16_t current_y = 0;
+volatile uint adc_throttle = 0;
+volatile uint adc_yaw = 0;
+volatile uint adc_pitch = 0;
+volatile uint adc_roll = 0;
 
-bool state;
-const uint LED_PIN = 25;
-unsigned long time = 0; 
-const int delayTime = 200; // Delay for every push button may vary
+// Keep track of which joystick/joystick axis is being read
+volatile uint axis_index = 0;
+struct repeating_timer joystick_timer;
 
-static void (*button_callback)() = 0;
-
-bool repeating_timer_callback(struct repeating_timer *t){
-    adc_select_input(current_adc);
-    if(current_adc == adc_x){
-        current_x = adc_read();
-        current_adc = adc_y;
-    }else{
-        current_y = adc_read();
-        current_adc = adc_x;
+/**
+ * @brief Effectively a loop that keeps switching between each of the joystick inputs and reading the data from them
+ * 
+ */
+bool joystick_repeating_timer_callback(struct repeating_timer *t){
+    switch (axis_index)
+    {
+        case 0:
+            adc_select_input(0);
+            adc_throttle = adc_read();
+            // Change which one to use after reading
+            // so the changes have propagated by the next read
+            gpio_put(3, 0);
+            gpio_put(6, 1);
+            break;
+        case 1:
+            adc_select_input(0);
+            adc_yaw = adc_read();
+            gpio_put(3, 1);
+            gpio_put(6, 0);
+            break;
+        case 2:
+            adc_select_input(1);
+            adc_pitch = adc_read();
+            break;
+        case 3:
+            adc_select_input(2);
+            adc_roll = adc_read();
+            break;
+        default:
+            break;
     }
+
+    // Go to next joystick/axis of joystick
+    axis_index++;
+    axis_index = axis_index % 4;
     return true;
 }
 
-void button_interrupt(uint gpio, uint32_t events) {
-    // debounce the button.
-    if ((to_ms_since_boot(get_absolute_time())-time)>delayTime) {
-        time = to_ms_since_boot(get_absolute_time());
-        
-        // printf("GPIO %d\n", gpio);
-        button_callback();
-    }
-}
-
-bool init_joystick(uint x_axis_pin, uint y_axis_pin, uint button_pin, void (*button_callback_temp)()){
-
-    // adc 1
-    switch (x_axis_pin){
-        case 28:
-            adc_x = 2;
-            break;
-        case 27:
-            adc_x = 1;
-            break;
-        case 26:
-            adc_x = 0;
-            break;
-        default:
-            return false;
-    }
-    // adc 2
-    switch (y_axis_pin){
-        case 28:
-            adc_y = 2;
-            break;
-        case 27:
-            adc_y = 1;
-            break;
-        case 26:
-            adc_y = 0;
-            break;
-        default:
-            return false;
-    }
-
-    // Check if it is the same
-    if(adc_x == adc_y){
-        return false;
-    }
-
+/**
+ * @brief Initialize the pins, adc's and timers used by joystick
+ * 
+ */
+void init_joystick(){
+    // TODO: make joystick stuff more abstract and less hard coded to be 4 values of throttle, yaw and so on
     adc_init();
-    adc_gpio_init(x_axis_pin); 
-    adc_gpio_init(y_axis_pin);
+    adc_gpio_init(26); 
+    adc_gpio_init(27);
+    adc_gpio_init(28);
 
-    // pull pin 28 high
-    gpio_init(28);
-    gpio_set_dir(28, GPIO_OUT);
-    gpio_put(28, 1);
+    // adc "multiplexer" initialization
+    gpio_init(3);
+    gpio_set_dir(3, GPIO_OUT);
+    gpio_put(3, 1);
 
-    current_adc = adc_x;
-
-    if(button_pin != 999){
-        gpio_set_irq_enabled_with_callback(button_pin, GPIO_IRQ_EDGE_FALL, true, &button_interrupt);
-
-        gpio_init(button_pin);
-        gpio_set_dir(button_pin, GPIO_IN);
-        gpio_put(button_pin, 1);
-        gpio_pull_up(button_pin);
-
-        time = to_ms_since_boot(get_absolute_time());
-        button_callback = button_callback_temp;
-    }
+    gpio_init(6);
+    gpio_set_dir(6, GPIO_OUT);
+    gpio_put(6, 1);
 
     // setup timer to switch between them;
-    add_repeating_timer_ms(20, repeating_timer_callback, NULL, &timer);
-    return true;
+    if(!add_repeating_timer_ms(2, joystick_repeating_timer_callback, NULL, &joystick_timer)){
+        printf("Failed to initialize timer for joystick\n");
+    }
 }
 
-
-uint16_t get_x(){
-    return current_x;
+uint16_t joystick_get_throttle(){
+    return adc_throttle;
 }
 
-uint16_t get_y(){
-    return current_y;
+uint16_t joystick_get_yaw(){
+    return adc_yaw;
 }
 
-float get_x_percentage(){
-    return ((float)current_x*100)/4095;
+uint16_t joystick_get_pitch(){
+    return adc_pitch;
 }
 
-float get_y_percentage(){
-    return ((float)current_y*100)/4095;
+uint16_t joystick_get_roll(){
+    return adc_roll;
+}
+
+float joystick_get_throttle_percent(){
+    return ((float)adc_throttle*100)/4095;
+}
+
+float joystick_get_yaw_percent(){
+    return ((float)adc_yaw*100)/4095;
+}
+
+float joystick_get_pitch_percent(){
+    return ((float)adc_pitch*100)/4095;
+}
+
+float joystick_get_roll_percent(){
+    return ((float)adc_roll*100)/4095;
+}
+
+float joystick_get_throttle_volts(){
+    return ((float)adc_throttle/4095.0) * 3.3;
+}
+
+float joystick_get_yaw_volts(){
+    return ((float)adc_yaw/4095.0) * 3.3;
+}
+
+float joystick_get_pitch_volts(){
+    return ((float)adc_pitch/4095.0) * 3.3;
+}
+
+float joystick_get_roll_volts(){
+    return ((float)adc_roll/4095.0) * 3.3;
 }

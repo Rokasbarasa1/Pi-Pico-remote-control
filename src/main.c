@@ -3,18 +3,21 @@
 #include "hardware/uart.h"
 #include <string.h>
 #include <stdlib.h>
+#include <math.h>
+#include <stdio.h>
+#include "pico/stdlib.h"
+#include "pico/binary_info.h"
+#include "hardware/i2c.h"
 
 #include "../lib/esp_01/esp_01.h"
 #include "../lib/joystick/joystick.h"
+#include "../lib/button/button.h"
+#include "../lib/rotary-encoder/rotary-encoder.h"
 #include "../lib/adxl345/adxl345.h"
 #include "../lib/nrf24l01/nrf24l01.h"
+#include "../lib/oled-display/oled-display.h"
 
-char *wifi_name = "ESP32_wifi";
-char *wifi_password = "1234567890";
-char *server_ip = "192.168.8.1";
-char *server_port = "3500";
-
-volatile bool send_data = false;
+volatile bool send_data = true;
 
 void button_callback(){
     printf("\nCALLED\n");
@@ -23,70 +26,138 @@ void button_callback(){
 
 unsigned char* int_to_string(uint number);
 unsigned char* generate_message_joystick_esp01(uint x, uint y, unsigned char *ADDRESS);
-unsigned char* generate_message_joystick_nrf24(uint x, uint y);
+unsigned char* generate_message_joystick_nrf24(uint throttle, uint yaw, uint pitch, uint roll);
 bool disable_repeated_send = false;
 
-// esp 01
+/**
+ * SPI0 RADIO nRF24L01+
+ * 
+ * GP19 TX
+ * GP18 SCK
+ * GP16 RX
+ * 
+ * GP7 CSN
+ * GP8 CE
+ * GP16 CS
+ */
+
+/**
+ * ADC for joysticks
+ * 
+ * GP28 ADC2
+ * GP27 ADC1
+ * GP26 ADC0 2 in 1
+ * 
+ * Use GP3 and GP6 to toggle which pin to use in ADC0
+ * Only one can be output high at a time
+ */
+
+/**
+ * Reset button
+ * 
+ * RUN (PIN28, bellow GP26)
+ */
+ 
+/**
+ * Rotary encoder 1 KY-040
+ * 
+ * Button GP22
+ * CLK GP12
+ * DT GP13
+ */
+
+/**
+ * Rotary encoder 2 KY-040
+ * 
+ * Button GP21
+ * CLK GP10
+ * DT GP11
+ */
+
+/**
+ * Display
+ * 
+ * SDA GP4
+ * SCL GP5
+ */
+
 int main() {
     stdio_init_all();
 
-    // status led
+    // Sleep a so you actually have time to read some of the serial outputs
+    sleep_ms(2500);
+    printf("STARTING PROGRAM\n");
+
+    // ########################################################## status led
+    printf("Gpio led init\n");
+
     gpio_init(2);
     gpio_set_dir(2, GPIO_OUT);
     gpio_put(2, 1);
 
-    // sleep because the program executes too quick
-    // and doesn't cache what is sent
-    sleep_ms(2500);
-    printf("STARTING PROGRAM\n");
+    // ########################################################## Joysticks
+    printf("Joystick init\n");
+    init_joystick();
+    float throttle = 0;
+    float yaw = 0;
+    float pitch = 0;
+    float roll = 0;
 
-    init_joystick(26,27,22, button_callback);
-    bool nrf24_setup = nrf24_init(spi_default, 7, 8, true);
+    // ########################################################## Button interrupts
+    printf("Buttons init\n");
 
-    if(nrf24_setup){
+    init_button(button_callback, 22);
+    init_button(button_callback, 21);
+
+    // ########################################################## Rotary encoders
+    // uint8_t rotary_encoder_1 = init_rotary_encoder(12, 13);
+    // uint8_t rotary_encoder_2 = init_rotary_encoder(10, 11);
+
+    // ########################################################## Oled display
+    printf("Oled init\n");
+    //init_oled_display(i2c_default, PICO_DEFAULT_I2C_SDA_PIN, PICO_DEFAULT_I2C_SCL_PIN);
+
+    // ########################################################## Setup radio communication
+    printf("Radio init\n");
+
+    if(nrf24_init(spi_default, 7, 8, true)){
         printf("nrf24 setup succeeded\n");
     }else{
         printf("nrf24 setup failed\n");
     }
 
     uint8_t tx_address[5] = {0xEE, 0xDD, 0xCC, 0xBB, 0xAA};
-    uint8_t rx_data[32];
-    uint8_t tx_data[] = "hello world!\n";
-
     nrf24_tx_mode(tx_address, 10);
-    
-    uint x_previous = 0;
-    uint y_previous = 0;
-    uint x = 1;
-    uint y = 1;
 
-    uint error_count = 0;
-    uint error_count_limit = 10;
+    // ########################################################## Main loop
     printf("\n\n====START OF LOOP====\n\n");
     while (true) {
         if(send_data){
-            x = (uint)get_x_percentage();
-            y = (uint)get_y_percentage();
+            // throttle = (uint)joystick_get_throttle_volts();
+            // yaw = (uint)joystick_get_yaw_volts();
+            // pitch = (uint)joystick_get_pitch_volts();
+            // roll = (uint)joystick_get_roll_volts();
 
-            if(x >= 2 && x <= 98){
-                x += 2;
+            throttle = joystick_get_throttle_volts();
+            yaw = joystick_get_yaw_volts();
+            pitch = joystick_get_pitch_volts();
+            roll = joystick_get_roll_volts();
+
+            ///printf("Current Joystick: %6.2f %d %d %d\n", throttle, yaw, pitch, roll);
+            printf("Current Joystick: %6.2f %6.2f %6.2f %6.2f\n", throttle, yaw, pitch, roll);
+        
+            //char *string = generate_message_joystick_nrf24(throttle, yaw, pitch, roll);
+            /*
+            if(nrf24_transmit(string)){
+                gpio_put(2, 1);
+            }else{
+                gpio_put(2, 1);
+                printf("BAD\n");
             }
+            */
+            gpio_put(2, 1);
 
-            if( !disable_repeated_send || x != x_previous || y != y_previous){
-                printf("\nCurrent x: %d\n", x);
-                printf("Current y: %d\n", x);
-            
-                x_previous = x;
-                y_previous = y;
-
-                char *string = generate_message_joystick_nrf24(x, y);
-                if(nrf24_transmit(string)){
-                    gpio_put(2, 1);
-                }else{
-                    printf("BAD\n");
-                }
-                free(string);
-            }   
+            //free(string);
         }
         
         sleep_ms(5);
@@ -136,50 +207,29 @@ unsigned char* int_to_string(uint number){
     return string;
 }
 
-unsigned char* generate_message_joystick_esp01(uint x, uint y, unsigned char *ADDRESS){
-    unsigned char* x_str = int_to_string(x);
-    unsigned char* y_str = int_to_string(y);
+unsigned char* generate_message_joystick_nrf24(uint throttle, uint yaw, uint pitch, uint roll){
+    unsigned char* throttle_str = int_to_string(throttle);
+    unsigned char* yaw_str = int_to_string(yaw);
+    unsigned char* pitch_str = int_to_string(pitch);
+    unsigned char* roll_str = int_to_string(roll);
 
-    uint connection_length = strlen("GET //") + strlen(" HTTP/1.1\r\nHost: ")+ strlen("\r\n") + strlen(ADDRESS) + strlen(x_str) + strlen(y_str);
-    unsigned char connection[connection_length];
-    memset(connection, 0, connection_length * sizeof(char));
-
-    strcat(connection, "GET /");
-    strcat(connection, x_str);
-    strcat(connection, "/");
-    strcat(connection, y_str);
-    strcat(connection, " HTTP/1.1\r\nHost: ");
-    strcat(connection, ADDRESS);
-    strcat(connection, "\r\n");
-
-    free(x_str);
-    free(y_str);
-
-    unsigned char *string = malloc(connection_length+1);
-
-    for(uint8_t i = 0; i < connection_length-1; i++){
-        string[i] = connection[i];
-    }
-    string[connection_length] = '\0';
-
-    return string;
-}
-
-unsigned char* generate_message_joystick_nrf24(uint x, uint y){
-    unsigned char* x_str = int_to_string(x);
-    unsigned char* y_str = int_to_string(y);
-
-    uint connection_length = strlen("//") + strlen(x_str) + strlen(y_str);
+    uint connection_length = strlen("////") + strlen(throttle_str) + strlen(yaw_str) + strlen(pitch_str) + strlen(roll_str);
     unsigned char connection[connection_length];
     memset(connection, 0, connection_length * sizeof(unsigned char));
 
     strcat(connection, "/");
-    strcat(connection, x_str);
+    strcat(connection, throttle_str);
     strcat(connection, "/");
-    strcat(connection, y_str);
+    strcat(connection, yaw_str);
+    strcat(connection, "/");
+    strcat(connection, pitch_str);
+    strcat(connection, "/");
+    strcat(connection, roll_str);
 
-    free(x_str);
-    free(y_str);
+    free(throttle_str);
+    free(yaw_str);
+    free(pitch_str);
+    free(roll_str);
 
     unsigned char *string = malloc(connection_length+1);
 

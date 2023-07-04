@@ -8,6 +8,12 @@
         "joystick.h": "c",
         "spi.h": "c",
         "nrf24l01.h": "c",
-        "adxl345.h": "c"
+        "adxl345.h": "c",
+        "button.h": "c",
+        "adc.h": "c",
+        "esp_01.h": "c",
+        "rotary-encoder.h": "c",
+        "i2c.h": "c",
+        "oled-display.h": "c"
     }
 }
