@@ -27,7 +27,7 @@ bool joystick_repeating_timer_callback(struct repeating_timer *t){
         case 1:
             adc_select_input(0);
             adc_yaw = adc_read();
-            gpio_put(3, 1);
+            gpio_put(3, 0);
             gpio_put(6, 0);
             break;
         case 2:
@@ -59,14 +59,14 @@ void init_joystick(){
     adc_gpio_init(27);
     adc_gpio_init(28);
 
-    // adc "multiplexer" initialization
+    // adc multiplexer initialization
     gpio_init(3);
     gpio_set_dir(3, GPIO_OUT);
-    gpio_put(3, 1);
+    gpio_put(3, 0);
 
     gpio_init(6);
     gpio_set_dir(6, GPIO_OUT);
-    gpio_put(6, 1);
+    gpio_put(6, 0);
 
     // setup timer to switch between them;
     if(!add_repeating_timer_ms(2, joystick_repeating_timer_callback, NULL, &joystick_timer)){
@@ -91,19 +91,19 @@ uint16_t joystick_get_roll(){
 }
 
 float joystick_get_throttle_percent(){
-    return ((float)adc_throttle*100)/4095;
+    return ((float)adc_throttle*100.0)/4095.0;
 }
 
 float joystick_get_yaw_percent(){
-    return ((float)adc_yaw*100)/4095;
+    return ((float)adc_yaw*100.0)/4095.0;
 }
 
 float joystick_get_pitch_percent(){
-    return ((float)adc_pitch*100)/4095;
+    return ((float)adc_pitch*100.0)/4095.0;
 }
 
 float joystick_get_roll_percent(){
-    return ((float)adc_roll*100)/4095;
+    return ((float)adc_roll*100.0)/4095.0;
 }
 
 float joystick_get_throttle_volts(){
