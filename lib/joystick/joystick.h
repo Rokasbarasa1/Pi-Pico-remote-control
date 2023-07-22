@@ -6,10 +6,10 @@
 #include <pico/time.h>
 
 void init_joystick();
-uint16_t joystick_get_throttle();
-uint16_t joystick_get_yaw();
-uint16_t joystick_get_pitch();
-uint16_t joystick_get_roll();
+uint16_t joystick_get_throttle_raw();
+uint16_t joystick_get_yaw_raw();
+uint16_t joystick_get_pitch_raw();
+uint16_t joystick_get_roll_raw();
 float joystick_get_throttle_percent();
 float joystick_get_yaw_percent();
 float joystick_get_pitch_percent();

@@ -15,5 +15,8 @@
         "rotary-encoder.h": "c",
         "i2c.h": "c",
         "oled-display.h": "c"
-    }
+    },
+    "cSpell.words": [
+        "deadzone"
+    ]
 }

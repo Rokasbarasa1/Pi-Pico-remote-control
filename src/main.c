@@ -17,6 +17,8 @@
 #include "../lib/nrf24l01/nrf24l01.h"
 #include "../lib/oled-display/oled-display.h"
 
+#define MAX_MESSAGE_LENGTH 100
+
 volatile bool send_data = false;
 
 void button_callback(){
@@ -82,6 +84,11 @@ bool disable_repeated_send = false;
  * SCL GP5
  */
 
+volatile uint throttle = 0;
+volatile uint yaw = 0;
+volatile uint pitch = 0;
+volatile uint roll = 0;
+
 int main() {
     stdio_init_all();
 
@@ -90,7 +97,6 @@ int main() {
     printf("STARTING PROGRAM\n");
 
     // ########################################################## status led
-
     gpio_init(2);
     gpio_set_dir(2, GPIO_OUT);
     gpio_put(2, 1);
@@ -98,15 +104,6 @@ int main() {
 
     // ########################################################## Joysticks
     init_joystick();
-    // float throttle = 0;
-    // float yaw = 0;
-    // float pitch = 0;
-    // float roll = 0;
-
-    uint throttle = 0;
-    uint yaw = 0;
-    uint pitch = 0;
-    uint roll = 0;
     printf("Joystick initialized\n");
 
     // ########################################################## Button interrupts
@@ -124,7 +121,6 @@ int main() {
     printf("Oled initialized\n");
 
     // ########################################################## Setup radio communication
-
     if(nrf24_init(spi_default, 7, 8, true)){
         printf("nrf24 setup succeeded\n");
     }else{
@@ -144,25 +140,14 @@ int main() {
             yaw = (uint)joystick_get_yaw_percent();
             pitch = (uint)joystick_get_pitch_percent();
             roll = (uint)joystick_get_roll_percent();
-            printf("Current Joystick: %d %d %d %d\n", throttle, yaw, pitch, roll);
-
-            // throttle = joystick_get_throttle_volts();
-            // yaw = joystick_get_yaw_volts();
-            // pitch = joystick_get_pitch_volts();
-            // roll = joystick_get_roll_volts();
-            // printf("Current Joystick: %6.2f %6.2f %6.2f %6.2f\n", throttle, yaw, pitch, roll);
+            //printf("Current Joystick: %d %d %d %d\n", throttle, yaw, pitch, roll);
         
             char *string = generate_message_joystick_nrf24(throttle, yaw, pitch, roll);
             printf("'%s'\n", string);
             if(nrf24_transmit(string)){
                 gpio_put(2, 1);
-            }else{
-                gpio_put(0, 1);
-                printf("BAD\n");
             }
             
-            gpio_put(2, 1);
-
             free(string);
         }
         
@@ -171,80 +156,15 @@ int main() {
     }
 }
 
-unsigned char* int_to_string(uint number){
-    uint8_t negative = 0;
-    // if (number < 0){
-    //     negative = 1;
-    //     number *= -1;
-    // }
-    if(number == 0){
-        unsigned char *string = malloc(2);
-        string[0] = '0';
-        string[1] = '\0'; 
-        return string;
-    }
-    
-    // get digit count
-    uint8_t count = 0;   // variable declaration 
-    int number_temp = number; 
-    while(number_temp!=0)  {  
-        number_temp=number_temp/10;
-        count++;  
-    }    
-
-    unsigned char *string = malloc(count+negative+1);
-    
-    for(uint8_t i = 0+negative; i < count+negative; i++){
-        uint32_t divisor = 1;
-        for(uint8_t j = 0; j < count-1-i; j++){
-            divisor = divisor * 10;
-        }
-
-        string[i] = 48 + (number / divisor);
-        number =  number % divisor;
-    }  
-
-    if(negative){
-        string[0] = '-';
-    }
-
-    string[count] = '\0';
-
-    return string;
-}
-
 unsigned char* generate_message_joystick_nrf24(uint throttle, uint yaw, uint pitch, uint roll){
-    unsigned char* throttle_str = int_to_string(throttle);
-    unsigned char* yaw_str = int_to_string(yaw);
-    unsigned char* pitch_str = int_to_string(pitch);
-    unsigned char* roll_str = int_to_string(roll);
+    // calculate the length of the resulting string
+    int length = snprintf(NULL, 0, "/%u/%u/%u/%u/  ", throttle, yaw, pitch, roll);
+    
+    // allocate memory for the string
+    unsigned char *string = malloc(length + 1); // +1 for the null terminator
 
-    uint connection_length = strlen("/////") + strlen(throttle_str) + strlen(yaw_str) + strlen(pitch_str) + strlen(roll_str) + 2;
-    unsigned char connection[connection_length];
-    memset(connection, 0, connection_length * sizeof(unsigned char));
-
-    strcat(connection, "/");
-    strcat(connection, throttle_str);
-    strcat(connection, "/");
-    strcat(connection, yaw_str);
-    strcat(connection, "/");
-    strcat(connection, pitch_str);
-    strcat(connection, "/");
-    strcat(connection, roll_str);
-    strcat(connection, "/");
-    strcat(connection, "  ");
-
-    free(throttle_str);
-    free(yaw_str);
-    free(pitch_str);
-    free(roll_str);
-
-    unsigned char *string = malloc(connection_length+1);
-
-    for(uint8_t i = 0; i < connection_length-1; i++){
-        string[i] = connection[i];
-    }
-    string[connection_length] = '\0';
+    // format the string
+    snprintf((char*)string, length + 1, "/%u/%u/%u/%u/  ", throttle, yaw, pitch, roll);
 
     return string;
 }
