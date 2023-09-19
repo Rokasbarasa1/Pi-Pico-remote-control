@@ -45,3 +45,7 @@ void oled_set_mode_inverted();
 void oled_set_page_mode();
 void oled_full_clear();
 void oled_set_cursor(uint8_t x, uint8_t y);
+void oled_canvas_clear();
+void oled_canvas_write(const char *string, uint8_t string_length, bool flip_letters);
+void oled_canvas_show();
+void oled_canvas_invert_row(uint8_t row_index);

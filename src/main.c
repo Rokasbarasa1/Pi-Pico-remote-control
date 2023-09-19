@@ -73,7 +73,7 @@ unsigned char* generate_message_joystick_nrf24(uint throttle, uint yaw, uint pit
  */
 
 /**
- * Display
+ * Display 128x64
  * 
  * SDA GP4
  * SCL GP5
@@ -113,8 +113,8 @@ enum t_pid_tune_mode {
 uint8_t* pid_tune_mode_strings[] = {
     (uint8_t*)"Back",
     (uint8_t*)"Edit PID Values",
-    (uint8_t*)"Sync Slave With Remote",
-    (uint8_t*)"Sync Remote With Slave"
+    (uint8_t*)"Sync Slave To Remote",
+    (uint8_t*)"Sync Remote To Slave"
 };
 
 enum t_pid_tune_mode_edit {
@@ -145,7 +145,6 @@ enum t_pid_tune_mode_edit current_pid_tune_edit = PID_TUNE_MODE_EDIT_NONE;
 enum t_pid_tune_mode_edit old_pid_tune_edit = PID_TUNE_MODE_EDIT_NONE;
 
 
-
 uint8_t rotary_encoder_1 = -99;
 uint8_t rotary_encoder_2 = -99;
 
@@ -154,7 +153,6 @@ int32_t rotary_encoder_2_old_value = 0;
 
 int32_t rotary_encoder_1_new_value = 0;
 int32_t rotary_encoder_2_new_value = 0;
-
 
 double base_proportional = 7.4;
 double base_integral = 3.4;
@@ -176,11 +174,17 @@ uint16_t positive_mod(int32_t value, uint16_t value_modal){
     return result;
 }
 
+volatile char string_buffer[100];
+volatile uint8_t string_length = 0;
+
+bool screen_enabled = true;
+bool screen_enabled_old = true;
+
 int main() {
     stdio_init_all();
 
     // Sleep a so you actually have time to read some of the serial outputs
-    sleep_ms(2500); // For debugging
+    // sleep_ms(2500); // For debugging
     printf("STARTING PROGRAM\n");
 
     // ########################################################## status led
@@ -210,6 +214,12 @@ int main() {
 
     // ########################################################## Oled display
     init_oled_display(i2c_default, PICO_DEFAULT_I2C_SDA_PIN, PICO_DEFAULT_I2C_SCL_PIN);
+
+    //oled_canvas_clear();
+    sleep_ms(1000);
+    //oled_canvas_write("123\n321\n456\n584\n116\n455", 23, true);
+    //oled_canvas_show();
+
     printf("Oled initialized\n");
 
     // ########################################################## Setup radio communication
@@ -228,10 +238,12 @@ int main() {
     printf("\n\n====START OF LOOP====\n\n");
     while (true) {
 
-        if( current_mode != old_mode || 
+
+        
+        if( (current_mode != old_mode || 
             current_control != old_control || 
             current_pid_tune != old_pid_tune || 
-            current_pid_tune_edit != old_pid_tune_edit
+            current_pid_tune_edit != old_pid_tune_edit) && screen_enabled
         ){
 
             if(current_mode != old_mode){
@@ -240,46 +252,75 @@ int main() {
                 old_control = current_control;
 
                 if(current_mode == MODE_MAIN){
+                    oled_canvas_clear();
+
+                    uint8_t selected_row = 0;
                     uint8_t size_mode_select_strings = sizeof(mode_select_strings) / sizeof(mode_select_strings[0]);
                     for (size_t i = 0; i < size_mode_select_strings; i++)
                     {
-                        printf("%s", mode_select_strings[i]);
+                        sprintf(string_buffer, "%s", mode_select_strings[i]);
+                        string_length = strlen(string_buffer);
+                        oled_canvas_write(string_buffer, string_length, true);
+                        memset(string_buffer, 0, string_length);
                         if(i == 0){
-                            printf(" XXXX");
+                            selected_row = i;
+                            // oled_canvas_write(" XXXX", 5, true);
                         }
-                        printf("\n");
+                        oled_canvas_write("\n", 1, true);
                     }
 
                     for (size_t i = 0; i < 5-size_mode_select_strings; i++){
-                        printf("\n");
+                        oled_canvas_write("\n", 1, true);
                     }
-                    
+
+                    oled_canvas_invert_row(selected_row);
+                    oled_canvas_show();
                 }else if(current_mode == MODE_CONTROL){
+                    oled_canvas_clear();
+
+                    uint8_t selected_row = 0;
                     uint8_t size_control_mode_strings = sizeof(control_mode_strings) / sizeof(control_mode_strings[0]);
                     for (size_t i = 0; i < size_control_mode_strings; i++)
                     {
-                        printf("%s", control_mode_strings[i]);
+                        sprintf(string_buffer, "%s", control_mode_strings[i]);
+                        string_length = strlen(string_buffer);
+                        oled_canvas_write(string_buffer, string_length, true);
+                        memset(string_buffer, 0, string_length);
                         if(i == 0){
-                            printf(" XXXX");
+                            selected_row = i;
+                            //oled_canvas_write(" XXXX", 5, true);
                         }
-                        printf("\n");
+                        oled_canvas_write("\n", 1, true);
                     }
                     for (size_t i = 0; i < 5-size_control_mode_strings; i++){
-                        printf("\n");
+                        oled_canvas_write("\n", 1, true);
                     }
+
+                    oled_canvas_invert_row(selected_row);
+                    oled_canvas_show();
                 }else if(current_mode == MODE_PID_TUNE){
+                    oled_canvas_clear();
+                    
+                    uint8_t selected_row = 0;
                     uint8_t size_pid_tune_mode_strings = sizeof(pid_tune_mode_strings) / sizeof(pid_tune_mode_strings[0]);
                     for (size_t i = 0; i < size_pid_tune_mode_strings; i++)
                     {
-                        printf("%s", pid_tune_mode_strings[i]);
+                        sprintf(string_buffer, "%s", pid_tune_mode_strings[i]);
+                        string_length = strlen(string_buffer);
+                        oled_canvas_write(string_buffer, string_length, true);
+                        memset(string_buffer, 0, string_length);
                         if(i == 0){
-                            printf(" XXXX");
+                            selected_row = i;
+                            // oled_canvas_write(" XXXX", 5, true);
                         }
-                        printf("\n");
+                        oled_canvas_write("\n", 1, true);
                     }
                     for (size_t i = 0; i < 5-size_pid_tune_mode_strings; i++){
-                        printf("\n");
+                        oled_canvas_write("\n", 1, true);
                     }
+
+                    oled_canvas_invert_row(selected_row);
+                    oled_canvas_show();
                 }
             }else if(current_control != old_control){
                 old_control = current_control;
@@ -289,32 +330,51 @@ int main() {
                 old_pid_tune_edit = current_pid_tune_edit;
 
                 if(current_pid_tune == PID_TUNE_MODE_NONE){
+                    oled_canvas_clear();
+
+                    uint8_t selected_row = 0;
                     uint8_t size_pid_tune_mode_strings = sizeof(pid_tune_mode_strings) / sizeof(pid_tune_mode_strings[0]);
                     for (size_t i = 0; i < size_pid_tune_mode_strings; i++)
                     {
-                        printf("%s", pid_tune_mode_strings[i]);
+                        sprintf(string_buffer, "%s", pid_tune_mode_strings[i]);
+                        string_length = strlen(string_buffer);
+                        oled_canvas_write(string_buffer, string_length, true);
+                        memset(string_buffer, 0, string_length);
                         if(i == 0){
-                            printf(" XXXX");
+                            selected_row = i;
+                            // oled_canvas_write(" XXXX", 5, true);
                         }
-                        printf("\n");
+                        oled_canvas_write("\n", 1, true);
                     }
                     for (size_t i = 0; i < 5-size_pid_tune_mode_strings; i++){
-                        printf("\n");
+                        oled_canvas_write("\n", 1, true);
                     }
-                }else if(current_pid_tune == PID_TUNE_MODE_EDIT_PID_VALUES){
 
+                    oled_canvas_invert_row(selected_row);
+                    oled_canvas_show();
+                }else if(current_pid_tune == PID_TUNE_MODE_EDIT_PID_VALUES){
+                    oled_canvas_clear();
+
+                    uint8_t selected_row = 0;
                     uint8_t size_pid_tune_mode_edit_strings = sizeof(pid_tune_mode_edit_strings) / sizeof(pid_tune_mode_edit_strings[0]);
                     for (size_t i = 0; i < size_pid_tune_mode_edit_strings; i++)
                     {
-                        printf("%s", pid_tune_mode_edit_strings[i]);
+                        sprintf(string_buffer, "%s", pid_tune_mode_edit_strings[i]);
+                        string_length = strlen(string_buffer);
+                        oled_canvas_write(string_buffer, string_length, true);
+                        memset(string_buffer, 0, string_length);
                         if(i == 0){
-                            printf(" XXXX");
+                            selected_row = i;
+                            // oled_canvas_write(" XXXX", 5, true);
                         }
-                        printf("\n");
+                        oled_canvas_write("\n", 1, true);
                     }
                     for (size_t i = 0; i < 5-size_pid_tune_mode_edit_strings; i++){
-                        printf("\n");
+                        oled_canvas_write("\n", 1, true);
                     }
+
+                    oled_canvas_invert_row(selected_row);
+                    oled_canvas_show();
                 }
                 // Other values dont have their own page
 
@@ -322,77 +382,143 @@ int main() {
                 old_pid_tune_edit = current_pid_tune_edit;
 
                 if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_NONE){
+                    oled_canvas_clear();
+
+                    uint8_t selected_row = 0;
                     uint8_t size_pid_tune_mode_edit_strings = sizeof(pid_tune_mode_edit_strings) / sizeof(pid_tune_mode_edit_strings[0]);
                     for (size_t i = 0; i < size_pid_tune_mode_edit_strings; i++)
                     {
-                        printf("%s", pid_tune_mode_edit_strings[i]);
+                        sprintf(string_buffer, "%s", pid_tune_mode_edit_strings[i]);
+                        string_length = strlen(string_buffer);
+                        oled_canvas_write(string_buffer, string_length, true);
+                        memset(string_buffer, 0, string_length);
                         if(i == 0){
-                            printf(" XXXX");
+                            selected_row = i;
+                            // oled_canvas_write(" XXXX", 5, true);
                         }
-                        printf("\n");
+                        oled_canvas_write("\n", 1, true);
                     }
                     for (size_t i = 0; i < 5-size_pid_tune_mode_edit_strings; i++){
-                        printf("\n");
+                        oled_canvas_write("\n", 1, true);
                     }
+
+                    oled_canvas_invert_row(selected_row);
+                    oled_canvas_show();
                 }else if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_PROPORTIONAL){
-                    printf("\n");
-                    printf("\n");
-                    printf("P Base: %3.3f P added: %3.3f\n", base_proportional, added_proportional);
-                    printf("\n");
-                    printf("\n");
+                    oled_canvas_clear();
+
+                    oled_canvas_write("\n", 1, true);
+                    oled_canvas_write("\n", 1, true);
+
+                    sprintf(string_buffer, "P base: %3.3f\n\nP added: %3.3f\n", base_proportional, added_proportional);
+                    string_length = strlen(string_buffer);
+                    oled_canvas_write(string_buffer, string_length, true);
+                    memset(string_buffer, 0, string_length);
+
+                    oled_canvas_write("\n", 1, true);
+                    oled_canvas_write("\n", 1, true);
+
+                    oled_canvas_show();
                 }else if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_INTEGRAL){
-                    printf("\n");
-                    printf("\n");
-                    printf("I Base: %3.3f I added: %3.3f\n", base_integral, added_integral);
-                    printf("\n");
-                    printf("\n");
+                    oled_canvas_clear();
+
+                    oled_canvas_write("\n", 1, true);
+                    oled_canvas_write("\n", 1, true);
+
+                    sprintf(string_buffer, "I base: %3.3f\n\nI added: %3.3f\n", base_integral, added_integral);
+                    string_length = strlen(string_buffer);
+                    oled_canvas_write(string_buffer, string_length, true);
+                    memset(string_buffer, 0, string_length);
+
+                    oled_canvas_write("\n", 1, true);
+                    oled_canvas_write("\n", 1, true);
+
+                    oled_canvas_show();
                 }else if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_DERIVATIVE){
-                    printf("\n");
-                    printf("\n");
-                    printf("D Base: %3.3f D added: %3.3f\n", base_derivative, added_derivative);
-                    printf("\n");
-                    printf("1\n");
+                    oled_canvas_clear();
+
+                    oled_canvas_write("\n", 1, true);
+                    oled_canvas_write("\n", 1, true);
+
+                    sprintf(string_buffer, "D base: %3.3f\n\nD added: %3.3f\n", base_derivative, added_derivative);
+                    string_length = strlen(string_buffer);
+                    oled_canvas_write(string_buffer, string_length, true);
+                    memset(string_buffer, 0, string_length);
+                    
+                    oled_canvas_write("\n", 1, true);
+                    oled_canvas_write("\n", 1, true);
+
+                    oled_canvas_show();
                 }else if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_MASTER_GAIN){
-                    printf("\n");
-                    printf("\n");
-                    printf("M Base: %3.3f M added: %3.3f\n", base_master_gain, added_master_gain);
-                    printf("\n");
-                    printf("\n");
+                    oled_canvas_clear();
+
+                    oled_canvas_write("\n", 1, true);
+                    oled_canvas_write("\n", 1, true);
+
+                    sprintf(string_buffer, "M base: %3.3f\n\nM added: %3.3f\n", base_master_gain, added_master_gain);
+                    string_length = strlen(string_buffer);
+                    oled_canvas_write(string_buffer, string_length, true);
+                    memset(string_buffer, 0, string_length);
+
+                    oled_canvas_write("\n", 1, true);
+                    oled_canvas_write("\n", 1, true);
+
+                    oled_canvas_show();
                 }
             }
         }
-
-        if (rotary_encoder_get_counter(rotary_encoder_1) != rotary_encoder_1_old_value){
+        
+        if ((rotary_encoder_get_counter(rotary_encoder_1) != rotary_encoder_1_old_value && screen_enabled) || screen_enabled_old == false && screen_enabled == true){
             rotary_encoder_1_new_value = rotary_encoder_get_counter(rotary_encoder_1);
 
             if(current_mode == MODE_MAIN){
+                oled_canvas_clear();
+
+                uint8_t selected_row = 0;
                 uint8_t size_mode_select_strings = sizeof(mode_select_strings) / sizeof(mode_select_strings[0]);
                 for (size_t i = 0; i < size_mode_select_strings; i++)
                 {
-                    printf("%s", mode_select_strings[i]);
+                    sprintf(string_buffer, "%s", mode_select_strings[i]);
+                    string_length = strlen(string_buffer);
+                    oled_canvas_write(string_buffer, string_length, true);
+                    memset(string_buffer, 0, string_length);
                     if(positive_mod(rotary_encoder_1_new_value, size_mode_select_strings) == i){
-                        printf(" XXXX");
+                        selected_row = i;
+                        // oled_canvas_write(" XXXX", 5, true);
                     }
-                    printf("\n");
+                    oled_canvas_write("\n", 1, true);
                 }
                 for (size_t i = 0; i < 5-size_mode_select_strings; i++){
-                    printf("\n");
+                    oled_canvas_write("\n", 1, true);
                 }
+
+                oled_canvas_invert_row(selected_row);
+                oled_canvas_show();
             }else if(current_mode == MODE_CONTROL){
 
                 if(current_control == CONTROL_MODE_NONE){
+                    oled_canvas_clear();
+
+                    uint8_t selected_row = 0;
                     uint8_t size_control_mode_strings = sizeof(control_mode_strings) / sizeof(control_mode_strings[0]);
                     for (size_t i = 0; i < size_control_mode_strings; i++)
                     {
-                        printf("%s", control_mode_strings[i]);
+                        sprintf(string_buffer, "%s", control_mode_strings[i]);
+                        string_length = strlen(string_buffer);
+                        oled_canvas_write(string_buffer, string_length, true);
+                        memset(string_buffer, 0, string_length);
                         if(positive_mod(rotary_encoder_1_new_value, size_control_mode_strings) == i){
-                            printf(" XXXX");
+                            selected_row = i;
+                            // oled_canvas_write(" XXXX", 5, true);
                         }
-                        printf("\n");
+                        oled_canvas_write("\n", 1, true);
                     }
                     for (size_t i = 0; i < 5-size_control_mode_strings; i++){
-                        printf("\n");
+                        oled_canvas_write("\n", 1, true);
                     }
+
+                    oled_canvas_invert_row(selected_row);
+                    oled_canvas_show();
                 }
 
                 // No features for this
@@ -400,62 +526,118 @@ int main() {
             }else if(current_mode == MODE_PID_TUNE){
 
                 if(current_pid_tune == PID_TUNE_MODE_NONE){
+                    oled_canvas_clear();
+
+                    uint8_t selected_row = 0;
                     uint8_t size_pid_tune_mode_strings = sizeof(pid_tune_mode_strings) / sizeof(pid_tune_mode_strings[0]);
                     for (size_t i = 0; i < size_pid_tune_mode_strings; i++)
                     {
-                        printf("%s", pid_tune_mode_strings[i]);
+                        sprintf(string_buffer, "%s", pid_tune_mode_strings[i]);
+                        string_length = strlen(string_buffer);
+                        oled_canvas_write(string_buffer, string_length, true);
+                        memset(string_buffer, 0, string_length);
                         if(positive_mod(rotary_encoder_1_new_value, size_pid_tune_mode_strings) == i){
-                            printf(" XXXX");
+                            selected_row = i;
+                            // oled_canvas_write(" XXXX", 5, true);
                         }
-                        printf("\n");
+                        oled_canvas_write("\n", 1, true);
                     }
                     for (size_t i = 0; i < 5-size_pid_tune_mode_strings; i++){
-                        printf("\n");
+                        oled_canvas_write("\n", 1, true);
                     }
+
+                    oled_canvas_invert_row(selected_row);
+                    oled_canvas_show();
                 }else if (current_pid_tune == PID_TUNE_MODE_EDIT_PID_VALUES){
 
                     if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_NONE){
+                        oled_canvas_clear();
+
+                        uint8_t selected_row = 0;
                         uint8_t size_pid_tune_mode_edit_strings = sizeof(pid_tune_mode_edit_strings) / sizeof(pid_tune_mode_edit_strings[0]);
                         for (size_t i = 0; i < size_pid_tune_mode_edit_strings; i++)
                         {
-                            printf("%s", pid_tune_mode_edit_strings[i]);
+                            sprintf(string_buffer, "%s", pid_tune_mode_edit_strings[i]);
+                            string_length = strlen(string_buffer);
+                            oled_canvas_write(string_buffer, string_length, true);
+                            memset(string_buffer, 0, string_length);
                             if(positive_mod(rotary_encoder_1_new_value, size_pid_tune_mode_edit_strings) == i){
-                                printf(" XXXX");
+                                selected_row = i;
+                                // oled_canvas_write(" XXXX", 5, true);
                             }
-                            printf("\n");
+                            oled_canvas_write("\n", 1, true);
                         }
                         for (size_t i = 0; i < 5-size_pid_tune_mode_edit_strings; i++){
-                            printf("\n");
+                            oled_canvas_write("\n", 1, true);
                         }
+
+                        oled_canvas_invert_row(selected_row);
+                        oled_canvas_show();
                     }
                     if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_PROPORTIONAL){
+                        oled_canvas_clear();
+
                         added_proportional = added_proportional + ((rotary_encoder_1_new_value - rotary_encoder_1_old_value) * DIAL_PRECISION);
-                        printf("\n");
-                        printf("\n");
-                        printf("P Base: %3.3f P added: %3.3f\n", base_proportional, added_proportional);
-                        printf("\n");
-                        printf("\n");
+                        oled_canvas_write("\n", 1, true);
+                        oled_canvas_write("\n", 1, true);
+
+                        sprintf(string_buffer, "P base: %3.3f\n\nP added: %3.3f\n", base_proportional, added_proportional);
+                        string_length = strlen(string_buffer);
+                        oled_canvas_write(string_buffer, string_length, true);
+                        memset(string_buffer, 0, string_length);
+
+                        oled_canvas_write("\n", 1, true);
+                        oled_canvas_write("\n", 1, true);
+
+                        oled_canvas_show();
                     }else if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_INTEGRAL){
+                        oled_canvas_clear();
+
                         added_integral = added_integral + ((rotary_encoder_1_new_value - rotary_encoder_1_old_value) * DIAL_PRECISION);
-                        printf("\n");
-                        printf("\n");
-                        printf("I Base: %3.3f I added: %3.3f\n", base_integral, added_integral);
-                        printf("\n");
-                        printf("\n");
+                        oled_canvas_write("\n", 1, true);
+                        oled_canvas_write("\n", 1, true);
+
+                        sprintf(string_buffer, "I base: %3.3f\n\nI added: %3.3f\n", base_integral, added_integral);
+                        string_length = strlen(string_buffer);
+                        oled_canvas_write(string_buffer, string_length, true);
+                        memset(string_buffer, 0, string_length);
+
+                        oled_canvas_write("\n", 1, true);
+                        oled_canvas_write("\n", 1, true);
+
+                        oled_canvas_show();
                     }else if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_DERIVATIVE){
+                        oled_canvas_clear();
+
                         added_derivative = added_derivative + ((rotary_encoder_1_new_value - rotary_encoder_1_old_value) * DIAL_PRECISION);
-                        printf("\n");
-                        printf("\n");
-                        printf("D Base: %3.3f D added: %3.3f\n", base_derivative, added_derivative);
-                        printf("\n");
-                        printf("\n");
+                        oled_canvas_write("\n", 1, true);
+                        oled_canvas_write("\n", 1, true);
+
+                        sprintf(string_buffer, "D base: %3.3f\n\nD added: %3.3f\n", base_derivative, added_derivative);
+                        string_length = strlen(string_buffer);
+                        oled_canvas_write(string_buffer, string_length, true);
+                        memset(string_buffer, 0, string_length);
+
+                        oled_canvas_write("\n", 1, true);
+                        oled_canvas_write("\n", 1, true);
+
+                        oled_canvas_show();
                     }else if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_MASTER_GAIN){
+                        oled_canvas_clear();
+
                         added_master_gain = added_master_gain + ((rotary_encoder_1_new_value - rotary_encoder_1_old_value) * DIAL_PRECISION);
-                        printf("\n");
-                        printf("\n");
-                        printf("M Base: %3.3f M added: %3.3f\n", base_master_gain, added_master_gain);
-                        printf("\n");
-                        printf("\n");
+                        oled_canvas_write("\n", 1, true);
+                        oled_canvas_write("\n", 1, true);
+
+                        sprintf(string_buffer, "M base: %3.3f\n\nM added: %3.3f\n", base_master_gain, added_master_gain);
+                        string_length = strlen(string_buffer);
+                        oled_canvas_write(string_buffer, string_length, true);
+                        memset(string_buffer, 0, string_length);
+
+                        oled_canvas_write("\n", 1, true);
+                        oled_canvas_write("\n", 1, true);
+
+                        oled_canvas_show();
                     }
 
                 }
@@ -467,10 +649,19 @@ int main() {
             rotary_encoder_1_old_value = rotary_encoder_1_new_value;
         }
 
-        //if (rotary_encoder_get_counter(rotary_encoder_2) != rotary_encoder_2_old_value){
+        //if (rotary_encoder_get_counter(rotary_encoder_2) != rotary_encoder_2_old_value && screen_enabled){
         //    rotary_encoder_2_new_value = rotary_encoder_get_counter(rotary_encoder_2);
         //    rotary_encoder_2_old_value = rotary_encoder_2_new_value;
         //}
+
+        if(screen_enabled_old != screen_enabled){
+            screen_enabled_old = screen_enabled;
+
+            if(!screen_enabled){
+                oled_canvas_clear();
+                oled_canvas_show();
+            }
+        }
 
         if(send_data){
             throttle = (uint)joystick_get_throttle_percent();
@@ -509,6 +700,9 @@ unsigned char* generate_message_joystick_nrf24(uint throttle, uint yaw, uint pit
 void button1_callback(){
     printf("\nCALLED 1\n");
 
+    if(!screen_enabled){
+        return;
+    }
 
     // GOOD
     if(current_mode == MODE_MAIN){
@@ -575,16 +769,24 @@ void button1_callback(){
         }
     }
 
-    printf("Before encoder 1 - %d - %d\n", rotary_encoder_1, rotary_encoder_get_counter(rotary_encoder_1));
-    printf("Before encoder 2 - %d - %d\n", rotary_encoder_2, rotary_encoder_get_counter(rotary_encoder_2));
+    // printf("Before encoder 1 - %d - %d\n", rotary_encoder_1, rotary_encoder_get_counter(rotary_encoder_1));
+    // printf("Before encoder 2 - %d - %d\n", rotary_encoder_2, rotary_encoder_get_counter(rotary_encoder_2));
     rotary_encoder_reset_counter(rotary_encoder_1);
     rotary_encoder_reset_counter(rotary_encoder_2);
-    printf("After encoder 1 - %d - %d\n", rotary_encoder_1, rotary_encoder_get_counter(rotary_encoder_1));
-    printf("After encoder 2 - %d - %d\n", rotary_encoder_2, rotary_encoder_get_counter(rotary_encoder_2));
+
+    rotary_encoder_1_old_value = 0;
+    rotary_encoder_1_new_value = 0;
+    rotary_encoder_2_old_value = 0;
+    rotary_encoder_2_new_value = 0;
+
+
+    // printf("After encoder 1 - %d - %d\n", rotary_encoder_1, rotary_encoder_get_counter(rotary_encoder_1));
+    // printf("After encoder 2 - %d - %d\n", rotary_encoder_2, rotary_encoder_get_counter(rotary_encoder_2));
 
 }
 
 void button2_callback(){
     printf("\nCALLED 2\n");
-    send_data = !send_data;
+    // send_data = !send_data;
+    screen_enabled = !screen_enabled;
 }
