@@ -182,6 +182,8 @@ void nrf24_reset(uint8_t REG)
 
 // Set nrf24 to transmit mode
 void nrf24_tx_mode(uint8_t *address, uint8_t channel){
+    send_command(FLUSH_RX);
+
 	// disable the chip before configuring the device
 	ce_disable();
 
@@ -202,6 +204,9 @@ void nrf24_tx_mode(uint8_t *address, uint8_t channel){
 
 // set nrf24 to receive mode
 void nrf24_rx_mode(uint8_t *address, uint8_t channel){
+    send_command(FLUSH_TX);
+    nrf24_reset(FIFO_STATUS);
+
 	// disable the chip before configuring the device
 	ce_disable();
 
@@ -211,7 +216,7 @@ void nrf24_rx_mode(uint8_t *address, uint8_t channel){
 
     // setup pipe 1
     uint8_t en_rxaddr = read_register(EN_RXADDR);
-	en_rxaddr = en_rxaddr | 0b00000010;
+	en_rxaddr = en_rxaddr | (1<<1);
 	write_register(EN_RXADDR, en_rxaddr); // set to use pipe 1
     write_register_multiple(RX_ADDR_P1, address, 5, false); // write address to pipe 1 address register
     write_register(RX_PW_P1, 32); // receive 32 bytes
@@ -287,7 +292,7 @@ bool nrf24_transmit(uint8_t *data){
 // Check if data is available on the specified pipe
 bool nrf24_data_available(int pipe_number){
 	uint8_t status = read_register(STATUS);
-    printf("STATUS "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(status));
+    // printf("STATUS "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(status));
 
 	if ((status&(1<<6))&&(status&(pipe_number<<1))){
 		write_register(STATUS, (1<<6));
@@ -357,22 +362,64 @@ bool nrf24_init(spi_inst_t *spi_temp, uint pin_csn_temp, uint pin_ce_temp, bool 
 
     nrf24_reset(0);
     write_register(CONFIG, 0b00000010);// Will come back
-    printf("CONFIG "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(CONFIG)));
+    // printf("CONFIG "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(CONFIG)));
     write_register(EN_AA, 0b00000000); // No auto ACK
-    printf("EN_AA "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(EN_AA)));
+    // printf("EN_AA "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(EN_AA)));
     write_register(EN_RXADDR, 0b00000000); // Will come back
-    printf("EN_RXADDR "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(EN_RXADDR)));
+    // printf("EN_RXADDR "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(EN_RXADDR)));
     write_register(SETUP_AW, 0b00000011); // 5 bytes rx/tx address field
-    printf("SETUP_AW "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(SETUP_AW)));
+    // printf("SETUP_AW "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(SETUP_AW)));
     write_register(SETUP_RETR, 0b00000000); // no ACK being used
-    printf("SETUP_RETR "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(SETUP_RETR)));
+    // printf("SETUP_RETR "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(SETUP_RETR)));
     write_register(RF_CH, 0b00000000);   // will come back
-    printf("RF_CH "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(RF_CH)));
+    // printf("RF_CH "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(RF_CH)));
     write_register(RF_SETUP, 0b00001110); // 0db power and data rate 2Mbps
-    printf("RF_SETUP "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(RF_SETUP)));
+    // printf("RF_SETUP "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(RF_SETUP)));
 
     ce_enable();
     return true;
+}
+
+void nrf24_crc(uint8_t enable){
+    uint8_t config = read_register(CONFIG);
+
+    if(enable){
+        config |= (1 << 3); // Enable CRC.
+        config |= (1 << 2);   // Set to 1 for 2 bytes CRC, and 0 for 1 byte CRC.
+    }else{
+        config |= (0 << 3); // Enable CRC.
+        config |= (0 << 2);   // Set to 1 for 2 bytes CRC, and 0 for 1 byte CRC.
+    }
+
+    write_register(CONFIG, config);
+}
+
+void nrf24_auto_ack(uint8_t enable){
+    uint8_t en_aa = read_register(EN_AA);
+
+    if(enable){
+        en_aa |= (1 << 1); // Enable auto acknowledgment on pipe 1.
+    }else{
+        en_aa |= (0 << 1); // Enable auto acknowledgment on pipe 1.
+    }
+
+    write_register(EN_AA, en_aa);
+}
+
+void nrf24_retransmission(uint8_t enable){
+    
+    uint8_t delay = 0;
+    uint8_t count = 0;
+
+    if(enable){
+        delay |= 0x0F; // How long the delay between transmits is
+        count |= 0x0F; // How many retransmits in total
+    }else{
+        delay |= 0; 
+        count |= 0; 
+    }
+
+    write_register(SETUP_RETR, (delay << 4) | count);
 }
 
 //Examples

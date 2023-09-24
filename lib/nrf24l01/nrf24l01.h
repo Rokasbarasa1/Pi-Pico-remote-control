@@ -55,3 +55,6 @@ bool nrf24_data_available(int pipe_number);
 bool nrf24_transmit (uint8_t *data);
 void nrf24_receive(uint8_t *data);
 void nrf24_read_all (uint8_t *data);
+void nrf24_crc(uint8_t enable);
+void nrf24_auto_ack(uint8_t enable);
+void nrf24_retransmission(uint8_t enable);
