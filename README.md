@@ -11,7 +11,9 @@ A generic remote control foundation for Throttle, yaw, pitch and roll control. W
 
 ![Control back](https://github.com/Rokas-embedded/Pi-Pico-remote-control/assets/50622827/923b51e5-9a99-4000-86ec-09de8f657412)
 
+# Vide demonstration
 
+[Remote control demonstration](https://www.youtube.com/watch?v=NInKOaa1TDU)
 
 
 # Old version of it

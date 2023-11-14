@@ -20,6 +20,8 @@
 
 #define MAX_MESSAGE_LENGTH 100
 #define DIAL_PRECISION 0.1
+#define DIAL_PRECISION_DERIVATIVE 0.01
+
 
 void button1_callback();
 void button2_callback();
@@ -43,7 +45,6 @@ void extract_pid_values(char *request, uint8_t request_size, double *base_propor
  * 
  * GP7 CSN
  * GP8 CE
- * GP16 CS
  */
 
 /**
@@ -172,10 +173,10 @@ int32_t rotary_encoder_1_new_value = 0;
 int32_t rotary_encoder_2_new_value = 0;
 
 // State of the pid menu
-volatile double m_base_proportional = 7.4;
-volatile double m_base_integral = 3.4;
-volatile double m_base_derivative = 2000;
-volatile double m_base_master_gain = 1.0;
+volatile double m_base_proportional = 0;
+volatile double m_base_integral = 0;
+volatile double m_base_derivative = 0;
+volatile double m_base_master_gain = 0;
 
 volatile double m_added_proportional = 0;
 volatile double m_added_integral = 0;
@@ -703,7 +704,7 @@ void screen_menu_logic(){
                 }else if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_DERIVATIVE){
                     oled_canvas_clear();
 
-                    m_added_derivative = m_added_derivative + ((rotary_encoder_1_new_value - rotary_encoder_1_old_value) * DIAL_PRECISION);
+                    m_added_derivative = m_added_derivative + ((rotary_encoder_1_new_value - rotary_encoder_1_old_value) * DIAL_PRECISION_DERIVATIVE);
                     oled_canvas_write("\n", 1, true);
                     oled_canvas_write("\n", 1, true);
 
