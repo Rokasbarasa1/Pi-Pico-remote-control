@@ -12,6 +12,7 @@
 // Max low  - 2872
 // Max      - 2936
 volatile uint adc_throttle = 0;
+volatile uint adc_throttle_array[MAX_AVERAGING_SAMPLE_SIZE];
 
 // Min      - 1534
 // High min - 1568      high Min to avg - 945
@@ -21,6 +22,7 @@ volatile uint adc_throttle = 0;
 // Low max  - 3163      low Max to avg - 761
 // Max      - 3240
 volatile uint adc_yaw = 0;
+volatile uint adc_yaw_array[MAX_AVERAGING_SAMPLE_SIZE];
 
 // Min      - 1278
 // High min - 1305      high Min to avg - 762
@@ -30,6 +32,7 @@ volatile uint adc_yaw = 0;
 // Low max  - 2810      low Max to avg - 829
 // Max      - 2869
 volatile uint adc_pitch = 0;
+volatile uint adc_pitch_array[MAX_AVERAGING_SAMPLE_SIZE];
 
 // Min      - 1457
 // High min - 1480      high Min to avg - 740
@@ -39,8 +42,12 @@ volatile uint adc_pitch = 0;
 // Low max  - 2874      low Max to avg - 745
 // Max      - 2942
 volatile uint adc_roll = 0;
+volatile uint adc_roll_array[MAX_AVERAGING_SAMPLE_SIZE];
 
 volatile float deadzone = 5;
+
+volatile uint16_t averaging_sample_size = 20;
+volatile uint16_t averaging_sample_array_index = 0;
 
 
 // Keep track of which joystick/joystick axis is being read
@@ -58,6 +65,8 @@ bool joystick_repeating_timer_callback(struct repeating_timer *t){
         case 0:
             adc_select_input(0);
             adc_throttle = adc_read();
+
+            adc_throttle_array[averaging_sample_array_index] = adc_throttle;
             // Change which one to use after reading
             // so the changes have propagated by the next read
             gpio_put(3, 0);
@@ -66,16 +75,25 @@ bool joystick_repeating_timer_callback(struct repeating_timer *t){
         case 1:
             adc_select_input(0);
             adc_yaw = adc_read();
+
+            adc_yaw_array[averaging_sample_array_index] = adc_yaw;
+
             gpio_put(3, 0);
             gpio_put(6, 0);
             break;
         case 2:
             adc_select_input(1);
             adc_pitch = adc_read();
+
+            adc_pitch_array[averaging_sample_array_index] = adc_pitch;
+
             break;
         case 3:
             adc_select_input(2);
             adc_roll = adc_read();
+
+            adc_roll_array[averaging_sample_array_index] = adc_roll;
+
             break;
         default:
             break;
@@ -83,6 +101,13 @@ bool joystick_repeating_timer_callback(struct repeating_timer *t){
 
     // Go to next joystick/axis of joystick
     axis_index++;
+
+
+    if(axis_index == 4){
+        // Increment the averaging index
+        averaging_sample_array_index++;
+        averaging_sample_array_index = averaging_sample_array_index % averaging_sample_size;
+    }
     axis_index = axis_index % 4;
     return true;
 }
@@ -108,7 +133,7 @@ void init_joystick(){
     gpio_put(6, 0);
 
     // setup timer to switch between them;
-    if(!add_repeating_timer_ms(2, joystick_repeating_timer_callback, NULL, &joystick_timer)){
+    if(!add_repeating_timer_ms(1, joystick_repeating_timer_callback, NULL, &joystick_timer)){
         printf("Failed to initialize timer for joystick\n");
     }
 }
@@ -131,8 +156,15 @@ uint16_t joystick_get_roll_raw(){
 
 
 float joystick_get_throttle_percent(){
+    // Calculate the average adc value
+    float average_throttle_sum = 0.0;
+    for(uint8_t i = 0; i < averaging_sample_size; i++){
+        average_throttle_sum = average_throttle_sum + (float) adc_throttle_array[i];
+    }
+    float average_throttle = average_throttle_sum / (float) averaging_sample_size;
+
     // Calculate percent value
-    float percent_value = (((float)adc_throttle-1489.0)*100.0)/(2872.0-1489.0);
+    float percent_value = (((float)average_throttle-1489.0)*100.0)/(2872.0-1489.0);
     
     // Doesn't have a deadzone in center
 
@@ -143,13 +175,19 @@ float joystick_get_throttle_percent(){
         percent_value = 100.0;
     }
 
-
     return percent_value;
 }
 
 float joystick_get_yaw_percent(){
-    // Calculate percent value
-    float percent_value = (((float)adc_yaw-1568.0-107.0)*100.0)/(3163.0-1568.0);
+    // Calculate the average adc value
+    float average_yaw_sum = 0.0;
+    for(uint8_t i = 0; i < averaging_sample_size; i++){
+        average_yaw_sum = average_yaw_sum + (float) adc_yaw_array[i];
+    }
+    float average_yaw = average_yaw_sum / (float) averaging_sample_size;
+
+    // Calculate average value
+    float percent_value = (((float)average_yaw-1568.0-107.0)*100.0)/(3163.0-1568.0);
     
     // Calculate deadzone
     if(percent_value < 50.0 + deadzone && percent_value > 50.0 - deadzone){
@@ -171,8 +209,15 @@ float joystick_get_yaw_percent(){
 }
 
 float joystick_get_pitch_percent(){
+    // Calculate the average adc value
+    float average_pitch_sum = 0.0;
+    for(uint8_t i = 0; i < averaging_sample_size; i++){
+        average_pitch_sum = average_pitch_sum + (float) adc_pitch_array[i];
+    }
+    float average_pitch = average_pitch_sum / (float) averaging_sample_size;
+
     // Calculate percent value
-    float percent_value = (((float)adc_pitch-1305.0-4.0)*100.0)/(2810.0-1305.0);
+    float percent_value = (((float)average_pitch-1305.0-4.0)*100.0)/(2810.0-1305.0);
     
     // Calculate deadzone
     if(percent_value < 50.0 + deadzone && percent_value > 50.0 - deadzone){
@@ -194,8 +239,15 @@ float joystick_get_pitch_percent(){
 }
 
 float joystick_get_roll_percent(){
+    // Calculate the average adc value
+    float average_roll_sum = 0.0;
+    for(uint8_t i = 0; i < averaging_sample_size; i++){
+        average_roll_sum = average_roll_sum + (float) adc_roll_array[i];
+    }
+    float average_roll = average_roll_sum / (float) averaging_sample_size;
+
     // Calculate percent value
-    float percent_value = (((float)adc_roll-1568.0+67.0)*100.0)/(2874.0-1480.0);
+    float percent_value = (((float)average_roll-1568.0+67.0)*100.0)/(2874.0-1480.0);
     
     // Calculate deadzone
     if(percent_value < 50.0 + deadzone && percent_value > 50.0 - deadzone){
@@ -231,4 +283,14 @@ float joystick_get_pitch_volts(){
 
 float joystick_get_roll_volts(){
     return ((float)adc_roll/4095.0) * 3.3;
+}
+
+void joystick_set_averaging_sample_size(uint8_t sample_size){
+    if(sample_size == 0 || sample_size > MAX_AVERAGING_SAMPLE_SIZE){
+        return;
+        printf("Sample size value is not allowed: %d\n", sample_size);
+    }
+    
+    averaging_sample_size = sample_size;
+    averaging_sample_array_index = 0;
 }

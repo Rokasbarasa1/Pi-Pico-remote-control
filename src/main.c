@@ -102,11 +102,13 @@ volatile uint roll = 0;
 enum t_mode {
     MODE_CONTROL,
     MODE_PID_TUNE,
+    MODE_REMOTE_SETTINGS,
     MODE_MAIN
 };
 uint8_t* mode_select_strings[] = {
     (uint8_t*)"Control mode",
-    (uint8_t*)"PID tune mode"
+    (uint8_t*)"PID tune mode",
+    (uint8_t*)"Remote settings"
 };
 
 enum t_control_mode {
@@ -146,6 +148,15 @@ uint8_t* pid_tune_mode_edit_strings[] = {
     (uint8_t*)"Apply to slave",
 };
 
+enum t_remote_settings_mode {
+    REMOTE_SETTINGS_MODE_NONE,
+    REMOTE_SETTINGS_MODE_EDIT_ADC_SAMPLE_SIZE
+};
+uint8_t* remote_settings_strings[] = {
+    (uint8_t*)"Back",
+    (uint8_t*)"Edit adc sample size"
+};
+
 // State of what menu is showing #####################################################
 enum t_mode current_mode = MODE_MAIN;
 enum t_mode old_mode = MODE_CONTROL;
@@ -159,6 +170,8 @@ enum t_pid_tune_mode old_pid_tune = PID_TUNE_MODE_NONE;
 enum t_pid_tune_mode_edit current_pid_tune_edit = PID_TUNE_MODE_EDIT_NONE;
 enum t_pid_tune_mode_edit old_pid_tune_edit = PID_TUNE_MODE_EDIT_NONE;
 
+enum t_remote_settings_mode current_remote_settings = REMOTE_SETTINGS_MODE_NONE;
+enum t_remote_settings_mode old_remote_settings = REMOTE_SETTINGS_MODE_NONE;
 
 // State of the rotary encoder and changes ###############################################
 
@@ -182,6 +195,9 @@ volatile double m_added_proportional = 0;
 volatile double m_added_integral = 0;
 volatile double m_added_derivative = 0;
 volatile double m_added_master_gain = 0;
+
+// State of remote settings
+volatile uint8_t m_average_sample_size = 5;
 
 // State of triggered actions
 bool action_apply_pid_to_slave = false;
@@ -214,6 +230,7 @@ int main() {
 
     // ########################################################## Joysticks
     init_joystick();
+    joystick_set_averaging_sample_size(m_average_sample_size);
     printf("Joystick initialized\n");
 
     // ########################################################## Button interrupts
@@ -259,10 +276,12 @@ int main() {
             yaw = (uint)joystick_get_yaw_percent();
             pitch = (uint)joystick_get_pitch_percent();
             roll = (uint)joystick_get_roll_percent();
-            //printf("Current Joystick: %d %d %d %d\n", throttle, yaw, pitch, roll);
+            // printf("Current Joystick: %d %d %d %d\n", throttle, yaw, pitch, roll);
+            printf("%d\n", throttle);
+
         
             char *string = generate_message_joystick_nrf24(throttle, yaw, pitch, roll);
-            printf("'%s'\n", string);
+            // printf("'%s'\n", string);
             if(nrf24_transmit(string)){
                 gpio_put(2, 1);
             }
@@ -331,15 +350,17 @@ void screen_menu_logic(){
     if( (current_mode != old_mode || 
         current_control != old_control || 
         current_pid_tune != old_pid_tune || 
+        current_remote_settings != old_remote_settings || 
         current_pid_tune_edit != old_pid_tune_edit) && screen_enabled
     ){
-
+        
         if(current_mode != old_mode){
             old_mode = current_mode;
             old_pid_tune = current_pid_tune;
             old_control = current_control;
 
             if(current_mode == MODE_MAIN){
+                printf("Rendering main\n");
                 oled_canvas_clear();
 
                 uint8_t selected_row = 0;
@@ -359,6 +380,8 @@ void screen_menu_logic(){
                 oled_canvas_invert_row(selected_row);
                 oled_canvas_show();
             }else if(current_mode == MODE_CONTROL){
+                printf("Rendering control\n");
+
                 oled_canvas_clear();
 
                 uint8_t selected_row = 0;
@@ -378,6 +401,8 @@ void screen_menu_logic(){
                 oled_canvas_invert_row(selected_row);
                 oled_canvas_show();
             }else if(current_mode == MODE_PID_TUNE){
+                printf("Rendering pid tune\n");
+
                 oled_canvas_clear();
                 
                 uint8_t selected_row = 0;
@@ -402,6 +427,28 @@ void screen_menu_logic(){
 
                 oled_canvas_invert_row(selected_row);
                 oled_canvas_show();
+            }else if(current_mode == MODE_REMOTE_SETTINGS){
+                printf("Rendering remote settings\n");
+
+                oled_canvas_clear();
+                
+                uint8_t selected_row = 0;
+                uint8_t size_remote_settings_strings = sizeof(remote_settings_strings) / sizeof(remote_settings_strings[0]);
+                for (size_t i = 0; i < size_remote_settings_strings; i++)
+                {
+                    sprintf(string_buffer, "%s", remote_settings_strings[i]);
+                    string_length = strlen(string_buffer);
+                    oled_canvas_write(string_buffer, string_length, true);
+                    memset(string_buffer, 0, string_length);
+                    if(i == 0){
+                        selected_row = i;
+                    }
+                    
+                    oled_canvas_write("\n", 1, true);
+                }
+
+                oled_canvas_invert_row(selected_row);
+                oled_canvas_show();
             }
         }else if(current_control != old_control){
             old_control = current_control;
@@ -411,6 +458,8 @@ void screen_menu_logic(){
             old_pid_tune_edit = current_pid_tune_edit;
 
             if(current_pid_tune == PID_TUNE_MODE_NONE){
+                printf("Rendering pid tune\n");
+
                 oled_canvas_clear();
 
                 uint8_t selected_row = 0;
@@ -435,6 +484,8 @@ void screen_menu_logic(){
                 oled_canvas_invert_row(selected_row);
                 oled_canvas_show();
             }else if(current_pid_tune == PID_TUNE_MODE_EDIT_PID_VALUES){
+                printf("Rendering pid tune edit\n");
+
                 oled_canvas_clear();
 
                 uint8_t selected_row = 0;
@@ -477,6 +528,8 @@ void screen_menu_logic(){
 
             // print out the default menu if nothing is selected
             if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_NONE){
+                printf("Rendering pid tune edit\n");
+
                 oled_canvas_clear();
 
                 uint8_t selected_row = 0;
@@ -513,6 +566,8 @@ void screen_menu_logic(){
                 oled_canvas_invert_row(selected_row);
                 oled_canvas_show();
             }else if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_PROPORTIONAL){
+                printf("Rendering pid tune edit P setting\n");
+
                 oled_canvas_clear();
 
                 oled_canvas_write("\n", 1, true);
@@ -525,6 +580,8 @@ void screen_menu_logic(){
 
                 oled_canvas_show();
             }else if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_INTEGRAL){
+                printf("Rendering pid tune edit I setting\n");
+
                 oled_canvas_clear();
 
                 oled_canvas_write("\n", 1, true);
@@ -537,6 +594,8 @@ void screen_menu_logic(){
 
                 oled_canvas_show();
             }else if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_DERIVATIVE){
+                printf("Rendering pid tune edit D setting\n");
+
                 oled_canvas_clear();
 
                 oled_canvas_write("\n", 1, true);
@@ -549,12 +608,55 @@ void screen_menu_logic(){
                 
                 oled_canvas_show();
             }else if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_MASTER_GAIN){
+                printf("Rendering pid tune edit master gain setting\n");
+
                 oled_canvas_clear();
 
                 oled_canvas_write("\n", 1, true);
                 oled_canvas_write("\n", 1, true);
 
                 sprintf(string_buffer, "M base: %3.3f\n\nM added: %3.3f\n", m_base_master_gain, m_added_master_gain);
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                oled_canvas_show();
+            }
+        }else if(current_remote_settings != old_remote_settings){
+
+            old_remote_settings = current_remote_settings;
+
+            if(current_remote_settings == REMOTE_SETTINGS_MODE_NONE){
+                printf("Rendering remote settings\n");
+
+                oled_canvas_clear();
+
+                uint8_t selected_row = 0;
+                uint8_t size_remote_settings_strings = sizeof(remote_settings_strings) / sizeof(remote_settings_strings[0]);
+                for (size_t i = 0; i < size_remote_settings_strings; i++)
+                {
+                    sprintf(string_buffer, "%s", remote_settings_strings[i]);
+                    string_length = strlen(string_buffer);
+                    oled_canvas_write(string_buffer, string_length, true);
+                    memset(string_buffer, 0, string_length);
+                    if(i == 0){
+                        selected_row = i;
+                    }
+
+                    oled_canvas_write("\n", 1, true);
+                }
+
+                oled_canvas_invert_row(selected_row);
+                oled_canvas_show();
+            }else if (current_remote_settings == REMOTE_SETTINGS_MODE_EDIT_ADC_SAMPLE_SIZE){
+                printf("Rendering remote settings adc setting\n");
+
+                oled_canvas_clear();
+
+                oled_canvas_write("\n", 1, true);
+                oled_canvas_write("\n", 1, true);
+
+                sprintf(string_buffer, "How many samples for average adc value?\n\nSamples #: %d\n", m_average_sample_size);
                 string_length = strlen(string_buffer);
                 oled_canvas_write(string_buffer, string_length, true);
                 memset(string_buffer, 0, string_length);
@@ -569,6 +671,8 @@ void screen_menu_logic(){
         rotary_encoder_1_new_value = rotary_encoder_get_counter(rotary_encoder_1);
 
         if(current_mode == MODE_MAIN){
+            printf("Rendering main REFRESH\n");
+
             oled_canvas_clear();
 
             uint8_t selected_row = 0;
@@ -588,8 +692,9 @@ void screen_menu_logic(){
             oled_canvas_invert_row(selected_row);
             oled_canvas_show();
         }else if(current_mode == MODE_CONTROL){
-
             if(current_control == CONTROL_MODE_NONE){
+                printf("Rendering control REFRESH\n");
+                
                 oled_canvas_clear();
 
                 uint8_t selected_row = 0;
@@ -613,8 +718,8 @@ void screen_menu_logic(){
             // No features for this
 
         }else if(current_mode == MODE_PID_TUNE){
-
             if(current_pid_tune == PID_TUNE_MODE_NONE){
+                printf("Rendering pid tune REFRESH\n");
                 oled_canvas_clear();
 
                 uint8_t selected_row = 0;
@@ -639,8 +744,8 @@ void screen_menu_logic(){
                 oled_canvas_invert_row(selected_row);
                 oled_canvas_show();
             }else if (current_pid_tune == PID_TUNE_MODE_EDIT_PID_VALUES){
-
                 if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_NONE){
+                    printf("Rendering pid tune edit REFRESH\n");
                     oled_canvas_clear();
 
                     uint8_t selected_row = 0;
@@ -676,6 +781,8 @@ void screen_menu_logic(){
                     oled_canvas_show();
                 }
                 if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_PROPORTIONAL){
+                    printf("Rendering pid tune edit P setting REFRESH\n");
+
                     oled_canvas_clear();
 
                     m_added_proportional = m_added_proportional + ((rotary_encoder_1_new_value - rotary_encoder_1_old_value) * DIAL_PRECISION);
@@ -689,6 +796,8 @@ void screen_menu_logic(){
 
                     oled_canvas_show();
                 }else if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_INTEGRAL){
+                    printf("Rendering pid tune edit I setting REFRESH\n");
+
                     oled_canvas_clear();
 
                     m_added_integral = m_added_integral + ((rotary_encoder_1_new_value - rotary_encoder_1_old_value) * DIAL_PRECISION);
@@ -702,6 +811,8 @@ void screen_menu_logic(){
 
                     oled_canvas_show();
                 }else if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_DERIVATIVE){
+                    printf("Rendering pid tune edit D setting REFRESH\n");
+
                     oled_canvas_clear();
 
                     m_added_derivative = m_added_derivative + ((rotary_encoder_1_new_value - rotary_encoder_1_old_value) * DIAL_PRECISION_DERIVATIVE);
@@ -715,6 +826,8 @@ void screen_menu_logic(){
 
                     oled_canvas_show();
                 }else if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_MASTER_GAIN){
+                    printf("Rendering pid tune edit master gain setting REFRESH\n");
+
                     oled_canvas_clear();
 
                     m_added_master_gain = m_added_master_gain + ((rotary_encoder_1_new_value - rotary_encoder_1_old_value) * DIAL_PRECISION);
@@ -730,6 +843,55 @@ void screen_menu_logic(){
                 }
 
             }
+        }else if(current_mode == MODE_REMOTE_SETTINGS){
+            if(current_remote_settings == REMOTE_SETTINGS_MODE_NONE){
+                printf("Rendering remote settings REFRESH\n");
+
+                oled_canvas_clear();
+
+                uint8_t selected_row = 0;
+                uint8_t size_remote_settings_strings = sizeof(remote_settings_strings) / sizeof(remote_settings_strings[0]);
+                for (size_t i = 0; i < size_remote_settings_strings; i++)
+                {
+                    sprintf(string_buffer, "%s", remote_settings_strings[i]);
+                    string_length = strlen(string_buffer);
+                    oled_canvas_write(string_buffer, string_length, true);
+                    memset(string_buffer, 0, string_length);
+                    if(positive_mod(rotary_encoder_1_new_value, size_remote_settings_strings) == i){
+                        selected_row = i;
+                    }
+                    oled_canvas_write("\n", 1, true);
+                }
+
+                oled_canvas_invert_row(selected_row);
+                oled_canvas_show();
+            }else if (current_remote_settings == REMOTE_SETTINGS_MODE_EDIT_ADC_SAMPLE_SIZE){
+                printf("Rendering remote settings adc setting REFRESH\n");
+
+                oled_canvas_clear();
+
+                m_average_sample_size = m_average_sample_size + (rotary_encoder_1_new_value - rotary_encoder_1_old_value);
+
+                if(m_average_sample_size == 0){
+                    m_average_sample_size = 1;
+                }else if(m_average_sample_size > MAX_AVERAGING_SAMPLE_SIZE){
+                    m_average_sample_size = MAX_AVERAGING_SAMPLE_SIZE;
+                }
+                
+                // Update the joystick driver with the new value
+                joystick_set_averaging_sample_size(m_average_sample_size);
+
+                oled_canvas_write("\n", 1, true);
+                oled_canvas_write("\n", 1, true);
+
+                sprintf(string_buffer, "How many samples for average adc value?\n\nSamples #: %d\n", m_average_sample_size);
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                oled_canvas_show();
+            }
+
         }
 
         // Update the old value to trigger the function next time
@@ -772,15 +934,15 @@ void button1_callback(){
 
     // GOOD
     if(current_mode == MODE_MAIN){
-
+        printf("Clicked on MODE_MAIN item\n");
         uint8_t size_mode_select_strings = sizeof(mode_select_strings) / sizeof(mode_select_strings[0]);
         uint16_t selected = positive_mod(rotary_encoder_1_new_value, size_mode_select_strings);
         current_mode = (mode_t)selected;
 
     // GOOD
     }else if(current_mode == MODE_CONTROL){
-
         if(current_control == CONTROL_MODE_NONE){
+            printf("Clicked on CONTROL_MODE_NONE item\n");
             uint8_t size_control_mode_strings = sizeof(control_mode_strings) / sizeof(control_mode_strings[0]);
             uint16_t selected = positive_mod(rotary_encoder_1_new_value, size_control_mode_strings);
             current_control = selected;
@@ -792,9 +954,12 @@ void button1_callback(){
         // No features in the control page currently
         
     }else if(current_mode == MODE_PID_TUNE){
+        printf("Clicked on MODE_PID_TUNE\n");
 
         // GOOD
         if(current_pid_tune == PID_TUNE_MODE_NONE){
+            printf("Clicked on PID_TUNE_MODE_NONE item\n");
+
             uint8_t size_pid_tune_mode_strings = sizeof(pid_tune_mode_strings) / sizeof(pid_tune_mode_strings[0]);
             uint16_t selected = positive_mod(rotary_encoder_1_new_value, size_pid_tune_mode_strings);
             current_pid_tune = selected;
@@ -818,8 +983,8 @@ void button1_callback(){
             }
 
         }else if (current_pid_tune == PID_TUNE_MODE_EDIT_PID_VALUES){
-
             if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_NONE){
+                printf("Clicked on PID_TUNE_MODE_EDIT_NONE item\n");
                 uint8_t size_pid_tune_mode_edit_strings = sizeof(pid_tune_mode_edit_strings) / sizeof(pid_tune_mode_edit_strings[0]);
                 uint16_t selected = positive_mod(rotary_encoder_1_new_value, size_pid_tune_mode_edit_strings);
                 current_pid_tune_edit = selected;
@@ -836,14 +1001,32 @@ void button1_callback(){
                 }
 
             }else if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_PROPORTIONAL){
+                printf("Clicked on PID_TUNE_MODE_EDIT_PROPORTIONAL item\n");
                 current_pid_tune_edit = PID_TUNE_MODE_EDIT_NONE;
             }else if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_INTEGRAL){
+                printf("Clicked on PID_TUNE_MODE_EDIT_INTEGRAL item\n");
                 current_pid_tune_edit = PID_TUNE_MODE_EDIT_NONE;
             }else if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_DERIVATIVE){
+                printf("Clicked on PID_TUNE_MODE_EDIT_DERIVATIVE item\n");
                 current_pid_tune_edit = PID_TUNE_MODE_EDIT_NONE;
             }else if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_MASTER_GAIN){
+                printf("Clicked on PID_TUNE_MODE_EDIT_MASTER_GAIN item\n");
                 current_pid_tune_edit = PID_TUNE_MODE_EDIT_NONE;
             }
+        }
+    }else if(current_mode == MODE_REMOTE_SETTINGS){
+        // GOOD
+        if(current_remote_settings == REMOTE_SETTINGS_MODE_NONE){
+            uint8_t size_remote_settings_strings = sizeof(remote_settings_strings) / sizeof(remote_settings_strings[0]);
+            uint16_t selected = positive_mod(rotary_encoder_1_new_value, size_remote_settings_strings);
+            current_remote_settings = selected;
+            printf("Clicked on MODE_REMOTE_SETTINGS item %d\n", selected);
+            if(selected == 0){
+                current_mode = MODE_MAIN;
+            }
+        }else if (current_remote_settings == REMOTE_SETTINGS_MODE_EDIT_ADC_SAMPLE_SIZE){
+            printf("Clicked on REMOTE_SETTINGS_MODE_EDIT_ADC_SAMPLE_SIZE item\n");
+            current_remote_settings = REMOTE_SETTINGS_MODE_NONE;
         }
     }
 
