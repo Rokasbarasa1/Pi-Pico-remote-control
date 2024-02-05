@@ -30,7 +30,8 @@ void apply_pid_to_slave();
 void sync_remote_with_slave();
 
 unsigned char* int_to_string(uint number);
-unsigned char* generate_message_joystick_nrf24(uint throttle, uint yaw, uint pitch, uint roll);
+unsigned char* generate_message_joystick_nrf24_uint(uint throttle, uint yaw, uint pitch, uint roll);
+unsigned char* generate_message_joystick_nrf24_float(float throttle, float yaw, float pitch, float roll);
 unsigned char* generate_message_pid_values_nrf24(double added_proportional, double added_integral, double added_derivative, double added_master_gain);
 uint16_t positive_mod(int32_t value, uint16_t value_modal);
 
@@ -92,11 +93,15 @@ bool disable_repeated_send = false;
 volatile bool send_data = false;
 
 
-volatile uint throttle = 0;
-volatile uint yaw = 0;
-volatile uint pitch = 0;
-volatile uint roll = 0;
+volatile uint m_throttle = 0;
+volatile uint m_yaw = 0;
+volatile uint m_pitch = 0;
+volatile uint m_roll = 0;
 
+volatile float m_float_throttle = 0;
+volatile float m_float_yaw = 0;
+volatile float m_float_pitch = 0;
+volatile float m_float_roll = 0;
 
 // Menu structure #######################################################
 enum t_mode {
@@ -197,7 +202,7 @@ volatile double m_added_derivative = 0;
 volatile double m_added_master_gain = 0;
 
 // State of remote settings
-volatile uint8_t m_average_sample_size = 5;
+volatile uint8_t m_average_sample_size = 10;
 
 // State of triggered actions
 bool action_apply_pid_to_slave = false;
@@ -268,25 +273,31 @@ int main() {
     // ########################################################## Main loop
     printf("\n\n====START OF LOOP====\n\n");
     while (true) {
-
         screen_menu_logic();
-
         if(current_mode == MODE_CONTROL){
-            throttle = (uint)joystick_get_throttle_percent();
-            yaw = (uint)joystick_get_yaw_percent();
-            pitch = (uint)joystick_get_pitch_percent();
-            roll = (uint)joystick_get_roll_percent();
-            // printf("Current Joystick: %d %d %d %d\n", throttle, yaw, pitch, roll);
-            printf("%d\n", throttle);
+            m_float_throttle = joystick_get_throttle_percent();
+            m_float_yaw = joystick_get_yaw_percent();
+            m_float_pitch = joystick_get_pitch_percent();
+            m_float_roll = joystick_get_roll_percent();
 
-        
-            char *string = generate_message_joystick_nrf24(throttle, yaw, pitch, roll);
-            // printf("'%s'\n", string);
-            if(nrf24_transmit(string)){
+            char *string_float = generate_message_joystick_nrf24_float(m_float_throttle, m_float_yaw, m_float_pitch, m_float_roll);
+
+            printf("'%s'\n", string_float);
+            if(nrf24_transmit(string_float)){
                 gpio_put(2, 1);
             }
-            
-            free(string);
+            free(string_float);
+
+            // m_throttle = (uint)joystick_get_throttle_percent();
+            // m_yaw = (uint)joystick_get_yaw_percent();
+            // m_pitch = (uint)joystick_get_pitch_percent();
+            // m_roll = (uint)joystick_get_roll_percent();
+            // char *string_uint = generate_message_joystick_nrf24_uint(m_throttle, m_yaw, m_pitch, m_roll);
+            // printf("'%s'\n", string_uint);
+            // if(nrf24_transmit(string_uint)){
+            //     gpio_put(2, 1);
+            // }
+            // free(string_uint);
         }
         
         sleep_ms(5);
@@ -302,15 +313,28 @@ uint16_t positive_mod(int32_t value, uint16_t value_modal){
     return result;
 }
 
-unsigned char* generate_message_joystick_nrf24(uint throttle, uint yaw, uint pitch, uint roll){
+unsigned char* generate_message_joystick_nrf24_uint(uint throttle, uint yaw, uint pitch, uint roll){
     // calculate the length of the resulting string
-    int length = snprintf(NULL, 0, "/joystick/%u/%u/%u/%u/  ", throttle, yaw, pitch, roll);
+    int length = snprintf(NULL, 0, "/js/%u/%u/%u/%u/  ", throttle, yaw, pitch, roll);
     
     // allocate memory for the string
     unsigned char *string = malloc(length + 1); // +1 for the null terminator
 
     // format the string
-    snprintf((char*)string, length + 1, "/joystick/%u/%u/%u/%u/  ", throttle, yaw, pitch, roll);
+    snprintf((char*)string, length + 1, "/js/%u/%u/%u/%u/  ", throttle, yaw, pitch, roll);
+
+    return string;
+}
+
+unsigned char* generate_message_joystick_nrf24_float(float throttle, float yaw, float pitch, float roll){
+    // calculate the length of the resulting string
+    int length = snprintf(NULL, 0, "/js/%3.1f/%3.1f/%3.1f/%3.1f/  ", throttle, yaw, pitch, roll);
+    
+    // allocate memory for the string
+    unsigned char *string = malloc(length + 1); // +1 for the null terminator
+
+    // format the string
+    snprintf((char*)string, length + 1, "/js/%3.1f/%3.1f/%3.1f/%3.1f/  ", throttle, yaw, pitch, roll);
 
     return string;
 }

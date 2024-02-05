@@ -132,8 +132,8 @@ void init_joystick(){
     gpio_set_dir(6, GPIO_OUT);
     gpio_put(6, 0);
 
-    // setup timer to switch between them;
-    if(!add_repeating_timer_ms(1, joystick_repeating_timer_callback, NULL, &joystick_timer)){
+    // setup timer to switch between them. 0.5 ms delay
+    if(!add_repeating_timer_us(500, joystick_repeating_timer_callback, NULL, &joystick_timer)){
         printf("Failed to initialize timer for joystick\n");
     }
 }
