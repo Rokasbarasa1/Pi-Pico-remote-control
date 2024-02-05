@@ -34,7 +34,7 @@ unsigned char* generate_message_joystick_nrf24_uint(uint throttle, uint yaw, uin
 unsigned char* generate_message_joystick_nrf24_float(float throttle, float yaw, float pitch, float roll);
 unsigned char* generate_message_pid_values_nrf24(double added_proportional, double added_integral, double added_derivative, double added_master_gain);
 uint16_t positive_mod(int32_t value, uint16_t value_modal);
-
+void check_throttle_safety();
 void extract_pid_values(char *request, uint8_t request_size, double *base_proportional, double *base_integral, double *base_derivative, double *base_master);
 
 /**
@@ -217,6 +217,8 @@ bool screen_enabled_old = true;
 bool current_remote_synced_to_slave = false;
 bool old_remote_synced_to_slave = false;
 
+bool throttle_safety_passed = false;
+
 uint8_t tx_address[5] = {0xEE, 0xDD, 0xCC, 0xBB, 0xAA};
 char rx_data[32];
 
@@ -280,6 +282,11 @@ int main() {
             m_float_pitch = joystick_get_pitch_percent();
             m_float_roll = joystick_get_roll_percent();
 
+            if(!throttle_safety_passed){
+                m_float_throttle = 0.0;
+                check_throttle_safety();
+            }
+
             char *string_float = generate_message_joystick_nrf24_float(m_float_throttle, m_float_yaw, m_float_pitch, m_float_roll);
 
             printf("'%s'\n", string_float);
@@ -311,6 +318,12 @@ uint16_t positive_mod(int32_t value, uint16_t value_modal){
         result += value_modal;
     }
     return result;
+}
+
+void check_throttle_safety(){
+    if(joystick_get_throttle_percent() == 0.0){
+        throttle_safety_passed = true;
+    }
 }
 
 unsigned char* generate_message_joystick_nrf24_uint(uint throttle, uint yaw, uint pitch, uint roll){
@@ -963,6 +976,11 @@ void button1_callback(){
         uint16_t selected = positive_mod(rotary_encoder_1_new_value, size_mode_select_strings);
         current_mode = (mode_t)selected;
 
+        // React to the user going into control mode
+        if(selected == 0){
+            throttle_safety_passed = false;
+        }
+
     // GOOD
     }else if(current_mode == MODE_CONTROL){
         if(current_control == CONTROL_MODE_NONE){
@@ -971,6 +989,8 @@ void button1_callback(){
             uint16_t selected = positive_mod(rotary_encoder_1_new_value, size_control_mode_strings);
             current_control = selected;
             if(selected == 0){
+                // React to the user leaving the control mode
+                check_throttle_safety();
                 current_mode = MODE_MAIN;
             }
         }
