@@ -275,7 +275,7 @@ void nrf24_rx_mode(uint8_t *address, uint8_t channel){
 // perform the transmission with specified data
 bool nrf24_transmit(uint8_t *data){
     write_register_multiple(W_TX_PAYLOAD, data, 32, true);
-	sleep_ms(1);
+	// sleep_ms(1);
 
 	uint8_t fifo_status = read_register(FIFO_STATUS);
 
@@ -306,7 +306,7 @@ bool nrf24_data_available(int pipe_number){
 void nrf24_receive(uint8_t *data){
 	// payload command
     read_register_multiple(R_RX_PAYLOAD, data, 32);
-    sleep_ms(1);
+    // sleep_ms(1);
 
 	send_command(FLUSH_RX);
 }

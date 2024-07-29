@@ -21,6 +21,8 @@
 #define MAX_MESSAGE_LENGTH 100
 #define DIAL_PRECISION 0.1
 #define DIAL_PRECISION_DERIVATIVE 0.01
+#define DIAL_PRECISION_ACCELEROMETER_CORRECTION 0.0001
+
 
 
 void button1_callback();
@@ -33,9 +35,12 @@ unsigned char* int_to_string(uint number);
 unsigned char* generate_message_joystick_nrf24_uint(uint throttle, uint yaw, uint pitch, uint roll);
 unsigned char* generate_message_joystick_nrf24_float(float throttle, float yaw, float pitch, float roll);
 unsigned char* generate_message_pid_values_nrf24(double added_proportional, double added_integral, double added_derivative, double added_master_gain);
+unsigned char* generate_message_accelerometer_corrections_nrf24(double added_accelerometer_x_value, double added_accelerometer_y_value);
 uint16_t positive_mod(int32_t value, uint16_t value_modal);
 void check_throttle_safety();
 void extract_pid_values(char *request, uint8_t request_size, double *base_proportional, double *base_integral, double *base_derivative, double *base_master);
+void init_loop_timer();
+void handle_loop_timing();
 
 /**
  * SPI0 RADIO nRF24L01+
@@ -108,12 +113,14 @@ enum t_mode {
     MODE_CONTROL,
     MODE_PID_TUNE,
     MODE_REMOTE_SETTINGS,
+    MODE_CORRECT_BALANCE,
     MODE_MAIN
 };
 uint8_t* mode_select_strings[] = {
     (uint8_t*)"Control mode",
     (uint8_t*)"PID tune mode",
-    (uint8_t*)"Remote settings"
+    (uint8_t*)"Remote settings",
+    (uint8_t*)"Correct balance",
 };
 
 enum t_control_mode {
@@ -162,6 +169,22 @@ uint8_t* remote_settings_strings[] = {
     (uint8_t*)"Edit adc sample size"
 };
 
+enum t_correct_balance_mode {
+    CORRECT_BALANCE_MODE_NONE,
+    CORRECT_BALANCE_MODE_X_AXIS,
+    CORRECT_BALANCE_MODE_Y_AXIS,
+    CORRECT_BALANCE_MODE_APPLY_TO_SLAVE
+};
+uint8_t* correct_balance_strings[] = {
+    (uint8_t*)"Back",
+    (uint8_t*)"X Axis      ",
+    (uint8_t*)"Y Axis      ",
+    (uint8_t*)"Apply to slave",
+};
+
+
+
+
 // State of what menu is showing #####################################################
 enum t_mode current_mode = MODE_MAIN;
 enum t_mode old_mode = MODE_CONTROL;
@@ -177,6 +200,9 @@ enum t_pid_tune_mode_edit old_pid_tune_edit = PID_TUNE_MODE_EDIT_NONE;
 
 enum t_remote_settings_mode current_remote_settings = REMOTE_SETTINGS_MODE_NONE;
 enum t_remote_settings_mode old_remote_settings = REMOTE_SETTINGS_MODE_NONE;
+
+enum t_correct_balance_mode current_correct_balance = CORRECT_BALANCE_MODE_NONE;
+enum t_correct_balance_mode old_correct_balance = CORRECT_BALANCE_MODE_NONE;
 
 // State of the rotary encoder and changes ###############################################
 
@@ -201,12 +227,20 @@ volatile double m_added_integral = 0;
 volatile double m_added_derivative = 0;
 volatile double m_added_master_gain = 0;
 
+volatile double m_base_accelerometer_x_correction = 0;
+volatile double m_base_accelerometer_y_correction = 0;
+
+volatile double m_added_accelerometer_x_correction = 0;
+volatile double m_added_accelerometer_y_correction = 0;
+
 // State of remote settings
 volatile uint8_t m_average_sample_size = 10;
 
 // State of triggered actions
 bool action_apply_pid_to_slave = false;
 bool action_sync_remote_to_slave = false;
+bool action_apply_accelerometer_correction_to_slave = false;
+
 
 volatile char string_buffer[100];
 volatile uint8_t string_length = 0;
@@ -221,6 +255,13 @@ bool throttle_safety_passed = false;
 
 uint8_t tx_address[5] = {0xEE, 0xDD, 0xCC, 0xBB, 0xAA};
 char rx_data[32];
+
+uint32_t loop_start_time = 0;
+uint32_t loop_end_time = 0;
+int16_t delta_loop_time = 0;
+
+#define REFRESH_RATE_HZ 200
+
 
 int main() {
     stdio_init_all();
@@ -273,7 +314,8 @@ int main() {
     printf("Radio initialized\n");
 
     // ########################################################## Main loop
-    printf("\n\n====START OF LOOP====\n\n");
+    printf("Looping\n");
+    init_loop_timer();
     while (true) {
         screen_menu_logic();
         if(current_mode == MODE_CONTROL){
@@ -288,8 +330,7 @@ int main() {
             }
 
             char *string_float = generate_message_joystick_nrf24_float(m_float_throttle, m_float_yaw, m_float_pitch, m_float_roll);
-
-            printf("'%s'\n", string_float);
+            // printf("'%s'\n", string_float);
             if(nrf24_transmit(string_float)){
                 gpio_put(2, 1);
             }
@@ -307,9 +348,31 @@ int main() {
             // free(string_uint);
         }
         
-        sleep_ms(5);
+        handle_loop_timing();
         gpio_put(2, 0);
     }
+}
+
+void init_loop_timer(){
+    loop_start_time = to_ms_since_boot(get_absolute_time());
+}
+
+void handle_loop_timing(){
+    loop_end_time = to_ms_since_boot(get_absolute_time());
+    delta_loop_time = loop_end_time - loop_start_time;
+
+    // printf("Tb: %dms ", delta_loop_time);
+
+    int time_to_wait = (1000 / REFRESH_RATE_HZ) - delta_loop_time;
+    if (time_to_wait > 0){
+        sleep_ms(time_to_wait);
+    }
+
+    // loop_end_time = to_ms_since_boot(get_absolute_time());
+    // delta_loop_time = loop_end_time - loop_start_time;
+    // printf("Ta: %dms\n", delta_loop_time);
+
+    loop_start_time = to_ms_since_boot(get_absolute_time());
 }
 
 uint16_t positive_mod(int32_t value, uint16_t value_modal){
@@ -349,6 +412,8 @@ unsigned char* generate_message_joystick_nrf24_float(float throttle, float yaw, 
     // format the string
     snprintf((char*)string, length + 1, "/js/%3.1f/%3.1f/%3.1f/%3.1f/  ", throttle, yaw, pitch, roll);
 
+    // There is no point optimizing this: (4 bytes float) * 4 + (1 byte slash) * 4 + 1 byte data type = 21
+    // Raw string takes the same size + 3 bytes more
     return string;
 }
 
@@ -381,14 +446,41 @@ unsigned char* generate_message_pid_values_nrf24(double added_proportional, doub
     return string;
 }
 
+unsigned char* generate_message_accelerometer_corrections_nrf24(double added_accelerometer_x, double added_accelerometer_y){
+    // calculate the length of the resulting string
+    int length = snprintf(
+        NULL, 
+        0, 
+        "/accel/%.4f/%.4f/  ", 
+        added_accelerometer_x, 
+        added_accelerometer_y
+    );
+    
+    // allocate memory for the string
+    unsigned char *string = malloc(length + 1); // +1 for the null terminator
+
+    // format the string
+    snprintf(
+        (char*)string, 
+        length + 1, 
+        "/accel/%.4f/%.4f/  ", 
+        added_accelerometer_x, 
+        added_accelerometer_y
+    );
+
+    return string;
+}
 
 void screen_menu_logic(){
     // Print out the new screen after button click. Also is triggered when screen goes from off to on
+    // It is annoying to do this but this is the best way
     if( (current_mode != old_mode || 
         current_control != old_control || 
         current_pid_tune != old_pid_tune || 
         current_remote_settings != old_remote_settings || 
-        current_pid_tune_edit != old_pid_tune_edit) && screen_enabled
+        current_pid_tune_edit != old_pid_tune_edit ||
+        current_correct_balance != old_correct_balance) && 
+        screen_enabled
     ){
         
         if(current_mode != old_mode){
@@ -481,6 +573,41 @@ void screen_menu_logic(){
                         selected_row = i;
                     }
                     
+                    oled_canvas_write("\n", 1, true);
+                }
+
+                oled_canvas_invert_row(selected_row);
+                oled_canvas_show();
+            }else if(current_mode == MODE_CORRECT_BALANCE){
+                printf("Rendering correct balance\n");
+                oled_canvas_clear();
+
+                uint8_t selected_row = 0;
+                uint8_t size_correct_balance_strings = sizeof(correct_balance_strings) / sizeof(correct_balance_strings[0]);
+
+                double corrections[2] = {
+                    m_base_accelerometer_x_correction+m_added_accelerometer_x_correction,
+                    m_base_accelerometer_y_correction+m_added_accelerometer_y_correction
+                };
+
+                for (size_t i = 0; i < size_correct_balance_strings; i++)
+                {
+                    sprintf(string_buffer, "%s", correct_balance_strings[i]);
+                    string_length = strlen(string_buffer);
+                    oled_canvas_write(string_buffer, string_length, true);
+                    memset(string_buffer, 0, string_length);
+                    if(i == 0){
+                        selected_row = i;
+                    }
+
+                    // Addition that prints the values of gains next to the menu items of them
+                    if(i >= 1 && i <= 2){
+                        sprintf(string_buffer, "%.4f", corrections[i-1]);
+                        string_length = strlen(string_buffer);
+                        oled_canvas_write(string_buffer, string_length, true);
+                        memset(string_buffer, 0, string_length);
+                    }
+
                     oled_canvas_write("\n", 1, true);
                 }
 
@@ -694,6 +821,73 @@ void screen_menu_logic(){
                 oled_canvas_write("\n", 1, true);
 
                 sprintf(string_buffer, "How many samples for average adc value?\n\nSamples #: %d\n", m_average_sample_size);
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                oled_canvas_show();
+            }
+        }else if(current_correct_balance != old_correct_balance){
+            old_correct_balance = current_correct_balance;
+
+            if(current_correct_balance == CORRECT_BALANCE_MODE_NONE){
+                printf("Rendering correct balance\n");
+                oled_canvas_clear();
+
+                uint8_t selected_row = 0;
+                uint8_t size_correct_balance_strings = sizeof(correct_balance_strings) / sizeof(correct_balance_strings[0]);
+
+                double corrections[2] = {
+                    m_base_accelerometer_x_correction+m_added_accelerometer_x_correction,
+                    m_base_accelerometer_y_correction+m_added_accelerometer_y_correction
+                };
+
+                for (size_t i = 0; i < size_correct_balance_strings; i++)
+                {
+                    sprintf(string_buffer, "%s", correct_balance_strings[i]);
+                    string_length = strlen(string_buffer);
+                    oled_canvas_write(string_buffer, string_length, true);
+                    memset(string_buffer, 0, string_length);
+                    if(i == 0){
+                        selected_row = i;
+                    }
+
+                    // Addition that prints the values of gains next to the menu items of them
+                    if(i >= 1 && i <= 2){
+                        sprintf(string_buffer, "%.4f", corrections[i-1]);
+                        string_length = strlen(string_buffer);
+                        oled_canvas_write(string_buffer, string_length, true);
+                        memset(string_buffer, 0, string_length);
+                    }
+
+                    oled_canvas_write("\n", 1, true);
+                }
+
+                oled_canvas_invert_row(selected_row);
+                oled_canvas_show();
+            }else if(current_correct_balance == CORRECT_BALANCE_MODE_X_AXIS){
+                printf("Rendering x axis correct\n");
+
+                oled_canvas_clear();
+
+                oled_canvas_write("\n", 1, true);
+                oled_canvas_write("\n", 1, true);
+
+                sprintf(string_buffer, "X base: %3.4f\n\nX added: %3.4f\n", m_base_accelerometer_x_correction, m_added_accelerometer_x_correction);
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                oled_canvas_show();
+            }else if(current_correct_balance == CORRECT_BALANCE_MODE_Y_AXIS){
+                printf("Rendering y axis correct\n");
+
+                oled_canvas_clear();
+
+                oled_canvas_write("\n", 1, true);
+                oled_canvas_write("\n", 1, true);
+
+                sprintf(string_buffer, "Y base: %3.4f\n\nY added: %3.4f\n", m_base_accelerometer_x_correction, m_added_accelerometer_x_correction);
                 string_length = strlen(string_buffer);
                 oled_canvas_write(string_buffer, string_length, true);
                 memset(string_buffer, 0, string_length);
@@ -929,8 +1123,76 @@ void screen_menu_logic(){
                 oled_canvas_show();
             }
 
-        }
+        }else if(current_mode == MODE_CORRECT_BALANCE){
+            if(current_correct_balance == CORRECT_BALANCE_MODE_NONE){
+                printf("Rendering correct balance REFRESH\n");
+                oled_canvas_clear();
 
+                uint8_t selected_row = 0;
+                uint8_t size_correct_balance_strings = sizeof(correct_balance_strings) / sizeof(correct_balance_strings[0]);
+
+                double corrections[2] = {
+                    m_base_accelerometer_x_correction+m_added_accelerometer_x_correction,
+                    m_base_accelerometer_y_correction+m_added_accelerometer_y_correction
+                };
+
+                for (size_t i = 0; i < size_correct_balance_strings; i++)
+                {
+                    sprintf(string_buffer, "%s", correct_balance_strings[i]);
+                    string_length = strlen(string_buffer);
+                    oled_canvas_write(string_buffer, string_length, true);
+                    memset(string_buffer, 0, string_length);
+                    if(positive_mod(rotary_encoder_1_new_value, size_correct_balance_strings) == i){
+                        selected_row = i;
+                    }
+
+                    // Addition that prints the values of gains next to the menu items of them
+                    if(i >= 1 && i <= 2){
+                        sprintf(string_buffer, "%.4f", corrections[i-1]);
+                        string_length = strlen(string_buffer);
+                        oled_canvas_write(string_buffer, string_length, true);
+                        memset(string_buffer, 0, string_length);
+                    }
+
+                    oled_canvas_write("\n", 1, true);
+                }
+
+                oled_canvas_invert_row(selected_row);
+                oled_canvas_show();
+            }else if(current_correct_balance == CORRECT_BALANCE_MODE_X_AXIS){
+                printf("Rendering x axis correct REFRESH\n");
+
+                oled_canvas_clear();
+
+                oled_canvas_write("\n", 1, true);
+                oled_canvas_write("\n", 1, true);
+
+                m_added_accelerometer_x_correction = m_added_accelerometer_x_correction + ((rotary_encoder_1_new_value - rotary_encoder_1_old_value) * DIAL_PRECISION_ACCELEROMETER_CORRECTION);
+
+                sprintf(string_buffer, "X base: %3.4f\n\nX added: %3.4f\n", m_base_accelerometer_x_correction, m_added_accelerometer_x_correction);
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                oled_canvas_show();
+            }else if(current_correct_balance == CORRECT_BALANCE_MODE_Y_AXIS){
+                printf("Rendering x axis correct REFRESH\n");
+
+                oled_canvas_clear();
+
+                oled_canvas_write("\n", 1, true);
+                oled_canvas_write("\n", 1, true);
+
+                m_added_accelerometer_y_correction = m_added_accelerometer_y_correction + ((rotary_encoder_1_new_value - rotary_encoder_1_old_value) * DIAL_PRECISION_ACCELEROMETER_CORRECTION);
+
+                sprintf(string_buffer, "Y base: %3.4f\n\nY added: %3.4f\n", m_base_accelerometer_y_correction, m_added_accelerometer_y_correction);
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                oled_canvas_show();
+            }
+        }
         // Update the old value to trigger the function next time
         rotary_encoder_1_old_value = rotary_encoder_1_new_value;
         old_remote_synced_to_slave = current_remote_synced_to_slave;
@@ -956,6 +1218,11 @@ void screen_menu_logic(){
     if(action_sync_remote_to_slave){
         action_sync_remote_to_slave = false;
         sync_remote_with_slave();
+    }
+
+    if(action_apply_accelerometer_correction_to_slave){
+        action_apply_accelerometer_correction_to_slave = false;
+        apply_accelerometer_correction_to_slave();
     }
 }
 
@@ -1072,6 +1339,30 @@ void button1_callback(){
             printf("Clicked on REMOTE_SETTINGS_MODE_EDIT_ADC_SAMPLE_SIZE item\n");
             current_remote_settings = REMOTE_SETTINGS_MODE_NONE;
         }
+    }else if(current_mode == MODE_CORRECT_BALANCE){
+        if(current_correct_balance == CORRECT_BALANCE_MODE_NONE){
+            uint8_t size_correct_balance_strings = sizeof(correct_balance_strings) / sizeof(correct_balance_strings[0]);
+            uint16_t selected = positive_mod(rotary_encoder_1_new_value, size_correct_balance_strings);
+            current_correct_balance = selected;
+            printf("Clicked on CORRECT_BALANCE_MODE_NONE item %d\n", selected);
+            if(selected == 0){
+                current_mode = MODE_MAIN;
+            }
+
+            if(current_correct_balance == CORRECT_BALANCE_MODE_APPLY_TO_SLAVE){
+                printf("APPLY TO SLAVE\n");
+                action_apply_accelerometer_correction_to_slave = true;
+
+                current_correct_balance = CORRECT_BALANCE_MODE_NONE;
+                refresh_page = false;
+            }
+        }else if(current_correct_balance == CORRECT_BALANCE_MODE_X_AXIS){
+            printf("Clicked on CORRECT_BALANCE_MODE_X_AXIS item\n");
+            current_correct_balance = CORRECT_BALANCE_MODE_NONE;
+        }else if(current_correct_balance == CORRECT_BALANCE_MODE_Y_AXIS){
+            printf("Clicked on CORRECT_BALANCE_MODE_X_AXIS item\n");
+            current_correct_balance = CORRECT_BALANCE_MODE_NONE;
+        }
     }
 
     if(refresh_page){
@@ -1103,7 +1394,23 @@ void apply_pid_to_slave(){
     );
     
     printf("'%s'\n", string);
-    if(nrf24_transmit(string)){
+    if(nrf24_transmit((uint8_t *)string)){
+        gpio_put(2, 1);
+    }
+    
+    free(string);
+}
+
+void apply_accelerometer_correction_to_slave(){
+    
+
+    char *string = generate_message_accelerometer_corrections_nrf24(
+        m_added_accelerometer_x_correction,
+        m_added_accelerometer_y_correction
+    );
+
+    printf("'%s'\n", string);
+    if(nrf24_transmit((uint8_t *)string)){
         gpio_put(2, 1);
     }
     
