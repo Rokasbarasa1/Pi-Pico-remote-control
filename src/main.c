@@ -41,39 +41,41 @@ void check_throttle_safety();
 void extract_pid_values(char *request, uint8_t request_size, double *base_proportional, double *base_integral, double *base_derivative, double *base_master);
 void init_loop_timer();
 void handle_loop_timing();
+void apply_flight_mode_to_slave();
+void apply_accelerometer_correction_to_slave();
 
 /**
  * SPI0 RADIO nRF24L01+
- * 
+ *
  * GP19 TX
  * GP18 SCK
  * GP16 RX
- * 
+ *
  * GP7 CSN
  * GP8 CE
  */
 
 /**
  * ADC for joysticks
- * 
+ *
  * GP28 ADC2
  * GP27 ADC1
  * GP26 ADC0 2 in 1
- * 
- * Use GP3 and GP6 to control the multiplexer MC14052BCP (same as CD4052) 
- * and tell it which pin to read from the joysticks and pass to ADC0 
- * 
+ *
+ * Use GP3 and GP6 to control the multiplexer MC14052BCP (same as CD4052)
+ * and tell it which pin to read from the joysticks and pass to ADC0
+ *
  */
 
 /**
  * Reset button
- * 
+ *
  * RUN (PIN28, bellow GP26)
  */
- 
+
 /**
  * Rotary encoder 1 KY-040
- * 
+ *
  * Button GP22
  * CLK GP12
  * DT GP13
@@ -81,7 +83,7 @@ void handle_loop_timing();
 
 /**
  * Rotary encoder 2 KY-040
- * 
+ *
  * Button GP21
  * CLK GP10
  * DT GP11
@@ -89,7 +91,7 @@ void handle_loop_timing();
 
 /**
  * Display 128x64
- * 
+ *
  * SDA GP4
  * SCL GP5
  */
@@ -114,6 +116,7 @@ enum t_mode {
     MODE_PID_TUNE,
     MODE_REMOTE_SETTINGS,
     MODE_CORRECT_BALANCE,
+    MODE_SLAVE_SETTINGS,
     MODE_MAIN
 };
 uint8_t* mode_select_strings[] = {
@@ -121,6 +124,7 @@ uint8_t* mode_select_strings[] = {
     (uint8_t*)"PID tune mode",
     (uint8_t*)"Remote settings",
     (uint8_t*)"Correct balance",
+    (uint8_t*)"Slave settings",
 };
 
 enum t_control_mode {
@@ -182,8 +186,16 @@ uint8_t* correct_balance_strings[] = {
     (uint8_t*)"Apply to slave",
 };
 
-
-
+enum t_slave_settings_mode{
+    SLAVE_SETTINGS_NONE,
+    SLAVE_SETTINGS_FLIGHT_MODE,
+    SLAVE_SETTINGS_APPLY_TO_SLAVE
+};
+uint8_t *slave_settings_strings[] = {
+    (uint8_t*)"Back",
+    (uint8_t*)"Flight mode  ",
+    (uint8_t*)"Apply to slave",
+};
 
 // State of what menu is showing #####################################################
 enum t_mode current_mode = MODE_MAIN;
@@ -203,6 +215,9 @@ enum t_remote_settings_mode old_remote_settings = REMOTE_SETTINGS_MODE_NONE;
 
 enum t_correct_balance_mode current_correct_balance = CORRECT_BALANCE_MODE_NONE;
 enum t_correct_balance_mode old_correct_balance = CORRECT_BALANCE_MODE_NONE;
+
+enum t_slave_settings_mode current_slave_settings = SLAVE_SETTINGS_NONE;
+enum t_slave_settings_mode old_slave_settings = SLAVE_SETTINGS_NONE;
 
 // State of the rotary encoder and changes ###############################################
 
@@ -233,6 +248,8 @@ volatile double m_base_accelerometer_y_correction = 0;
 volatile double m_added_accelerometer_x_correction = 0;
 volatile double m_added_accelerometer_y_correction = 0;
 
+volatile uint8_t flight_mode = 0;
+
 // State of remote settings
 volatile uint8_t m_average_sample_size = 10;
 
@@ -240,7 +257,7 @@ volatile uint8_t m_average_sample_size = 10;
 bool action_apply_pid_to_slave = false;
 bool action_sync_remote_to_slave = false;
 bool action_apply_accelerometer_correction_to_slave = false;
-
+bool action_apply_flight_mode = false;
 
 volatile char string_buffer[100];
 volatile uint8_t string_length = 0;
@@ -347,7 +364,7 @@ int main() {
             // }
             // free(string_uint);
         }
-        
+
         handle_loop_timing();
         gpio_put(2, 0);
     }
@@ -392,7 +409,7 @@ void check_throttle_safety(){
 unsigned char* generate_message_joystick_nrf24_uint(uint throttle, uint yaw, uint pitch, uint roll){
     // calculate the length of the resulting string
     int length = snprintf(NULL, 0, "/js/%u/%u/%u/%u/  ", throttle, yaw, pitch, roll);
-    
+
     // allocate memory for the string
     unsigned char *string = malloc(length + 1); // +1 for the null terminator
 
@@ -405,7 +422,7 @@ unsigned char* generate_message_joystick_nrf24_uint(uint throttle, uint yaw, uin
 unsigned char* generate_message_joystick_nrf24_float(float throttle, float yaw, float pitch, float roll){
     // calculate the length of the resulting string
     int length = snprintf(NULL, 0, "/js/%3.1f/%3.1f/%3.1f/%3.1f/  ", throttle, yaw, pitch, roll);
-    
+
     // allocate memory for the string
     unsigned char *string = malloc(length + 1); // +1 for the null terminator
 
@@ -420,26 +437,26 @@ unsigned char* generate_message_joystick_nrf24_float(float throttle, float yaw, 
 unsigned char* generate_message_pid_values_nrf24(double added_proportional, double added_integral, double added_derivative, double added_master_gain){
     // calculate the length of the resulting string
     int length = snprintf(
-        NULL, 
-        0, 
-        "/pid/%.2f/%.2f/%.2f/%.2f/  ", 
-        added_proportional, 
-        added_integral, 
-        added_derivative, 
+        NULL,
+        0,
+        "/pid/%.2f/%.2f/%.2f/%.2f/  ",
+        added_proportional,
+        added_integral,
+        added_derivative,
         added_master_gain
     );
-    
+
     // allocate memory for the string
     unsigned char *string = malloc(length + 1); // +1 for the null terminator
 
     // format the string
     snprintf(
         (char*)string, 
-        length + 1, 
-        "/pid/%.2f/%.2f/%.2f/%.2f/  ", 
-        added_proportional, 
-        added_integral, 
-        added_derivative, 
+        length + 1,
+        "/pid/%.2f/%.2f/%.2f/%.2f/  ",
+        added_proportional,
+        added_integral,
+        added_derivative,
         added_master_gain
     );
 
@@ -449,23 +466,46 @@ unsigned char* generate_message_pid_values_nrf24(double added_proportional, doub
 unsigned char* generate_message_accelerometer_corrections_nrf24(double added_accelerometer_x, double added_accelerometer_y){
     // calculate the length of the resulting string
     int length = snprintf(
-        NULL, 
-        0, 
-        "/accel/%.4f/%.4f/  ", 
-        added_accelerometer_x, 
+        NULL,
+        0,
+        "/accel/%.4f/%.4f/  ",
+        added_accelerometer_x,
         added_accelerometer_y
     );
-    
+
     // allocate memory for the string
     unsigned char *string = malloc(length + 1); // +1 for the null terminator
 
     // format the string
     snprintf(
         (char*)string, 
-        length + 1, 
-        "/accel/%.4f/%.4f/  ", 
-        added_accelerometer_x, 
+        length + 1,
+        "/accel/%.4f/%.4f/  ",
+        added_accelerometer_x,
         added_accelerometer_y
+    );
+
+    return string;
+}
+
+unsigned char *generate_message_flight_mode_selection_nrf24(uint8_t flight_mode){
+    // calculate the length of the resulting string
+    int length = snprintf(
+        NULL,
+        0,
+        "/flight_mode/%d/  ",
+        flight_mode
+    );
+
+    // allocate memory for the string
+    unsigned char *string = malloc(length + 1); // +1 for the null terminator
+
+    // format the string
+    snprintf(
+        (char *)string,
+        length + 1,
+        "/flight_mode/%d/  ",
+        flight_mode
     );
 
     return string;
@@ -475,14 +515,15 @@ void screen_menu_logic(){
     // Print out the new screen after button click. Also is triggered when screen goes from off to on
     // It is annoying to do this but this is the best way
     if( (current_mode != old_mode || 
-        current_control != old_control || 
-        current_pid_tune != old_pid_tune || 
-        current_remote_settings != old_remote_settings || 
-        current_pid_tune_edit != old_pid_tune_edit ||
-        current_correct_balance != old_correct_balance) && 
+         current_control != old_control ||
+         current_pid_tune != old_pid_tune ||
+         current_remote_settings != old_remote_settings ||
+         current_pid_tune_edit != old_pid_tune_edit ||
+         current_correct_balance != old_correct_balance ||
+         current_slave_settings != old_slave_settings) &&
         screen_enabled
     ){
-        
+
         if(current_mode != old_mode){
             old_mode = current_mode;
             old_pid_tune = current_pid_tune;
@@ -533,7 +574,7 @@ void screen_menu_logic(){
                 printf("Rendering pid tune\n");
 
                 oled_canvas_clear();
-                
+
                 uint8_t selected_row = 0;
                 uint8_t size_pid_tune_mode_strings = sizeof(pid_tune_mode_strings) / sizeof(pid_tune_mode_strings[0]);
                 for (size_t i = 0; i < size_pid_tune_mode_strings; i++)
@@ -550,7 +591,7 @@ void screen_menu_logic(){
                     if(i == 3 && current_remote_synced_to_slave){
                         oled_canvas_write(" X", 2, true);
                     }
-                    
+
                     oled_canvas_write("\n", 1, true);
                 }
 
@@ -560,7 +601,7 @@ void screen_menu_logic(){
                 printf("Rendering remote settings\n");
 
                 oled_canvas_clear();
-                
+
                 uint8_t selected_row = 0;
                 uint8_t size_remote_settings_strings = sizeof(remote_settings_strings) / sizeof(remote_settings_strings[0]);
                 for (size_t i = 0; i < size_remote_settings_strings; i++)
@@ -572,7 +613,7 @@ void screen_menu_logic(){
                     if(i == 0){
                         selected_row = i;
                     }
-                    
+
                     oled_canvas_write("\n", 1, true);
                 }
 
@@ -603,6 +644,39 @@ void screen_menu_logic(){
                     // Addition that prints the values of gains next to the menu items of them
                     if(i >= 1 && i <= 2){
                         sprintf(string_buffer, "%.4f", corrections[i-1]);
+                        string_length = strlen(string_buffer);
+                        oled_canvas_write(string_buffer, string_length, true);
+                        memset(string_buffer, 0, string_length);
+                    }
+
+                    oled_canvas_write("\n", 1, true);
+                }
+
+                oled_canvas_invert_row(selected_row);
+                oled_canvas_show();
+            }else if(current_mode == MODE_SLAVE_SETTINGS){
+                printf("Rendering slave settings\n");
+                oled_canvas_clear();
+
+                uint8_t selected_row = 0;
+                uint8_t size_slave_settings_strings = sizeof(slave_settings_strings) / sizeof(slave_settings_strings[0]);
+
+                uint8_t settings[1] = {
+                    flight_mode
+                };
+
+                for (size_t i = 0; i < size_slave_settings_strings; i++){
+                    sprintf(string_buffer, "%s", slave_settings_strings[i]);
+                    string_length = strlen(string_buffer);
+                    oled_canvas_write(string_buffer, string_length, true);
+                    memset(string_buffer, 0, string_length);
+                    if(i == 0){
+                        selected_row = i;
+                    }
+
+                    // Addition that prints the values of settings next to the menu items of them
+                    if(i >= 1 && i <= 1){
+                        sprintf(string_buffer, "%d", settings[i-1]);
                         string_length = strlen(string_buffer);
                         oled_canvas_write(string_buffer, string_length, true);
                         memset(string_buffer, 0, string_length);
@@ -661,7 +735,7 @@ void screen_menu_logic(){
                     m_base_derivative+m_added_derivative,
                     m_base_master_gain+m_added_master_gain
                 };
-                
+
                 for (size_t i = 0; i < size_pid_tune_mode_edit_strings; i++)
                 {
                     sprintf(string_buffer, "%s", pid_tune_mode_edit_strings[i]);
@@ -715,7 +789,7 @@ void screen_menu_logic(){
                     if(i == 0){
                         selected_row = i;
                     }
-                    
+
                     // Addition that prints the values of gains next to the menu items of them
                     if(i >= 1 && i <= 4){
                         sprintf(string_buffer, "%.2f", gains[i-1]);
@@ -769,7 +843,7 @@ void screen_menu_logic(){
                 string_length = strlen(string_buffer);
                 oled_canvas_write(string_buffer, string_length, true);
                 memset(string_buffer, 0, string_length);
-                
+
                 oled_canvas_show();
             }else if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_MASTER_GAIN){
                 printf("Rendering pid tune edit master gain setting\n");
@@ -842,8 +916,7 @@ void screen_menu_logic(){
                     m_base_accelerometer_y_correction+m_added_accelerometer_y_correction
                 };
 
-                for (size_t i = 0; i < size_correct_balance_strings; i++)
-                {
+                for (size_t i = 0; i < size_correct_balance_strings; i++){
                     sprintf(string_buffer, "%s", correct_balance_strings[i]);
                     string_length = strlen(string_buffer);
                     oled_canvas_write(string_buffer, string_length, true);
@@ -852,7 +925,7 @@ void screen_menu_logic(){
                         selected_row = i;
                     }
 
-                    // Addition that prints the values of gains next to the menu items of them
+                    // Addition that prints the values of corrections next to the menu items of them
                     if(i >= 1 && i <= 2){
                         sprintf(string_buffer, "%.4f", corrections[i-1]);
                         string_length = strlen(string_buffer);
@@ -894,9 +967,60 @@ void screen_menu_logic(){
 
                 oled_canvas_show();
             }
+        }else if(current_slave_settings != old_slave_settings){
+            old_slave_settings = current_slave_settings;
+            printf("IN SLAVE SETTING IF\n");
+            if(current_slave_settings == SLAVE_SETTINGS_NONE){
+                printf("Rendering slave settings\n");
+                oled_canvas_clear();
+
+                uint8_t selected_row = 0;
+                uint8_t size_slave_settings_strings = sizeof(slave_settings_strings) / sizeof(slave_settings_strings[0]);
+
+                uint8_t settings[1] = {
+                    flight_mode
+                };
+
+                for (size_t i = 0; i < size_slave_settings_strings; i++){
+                    sprintf(string_buffer, "%s", slave_settings_strings[i]);
+                    string_length = strlen(string_buffer);
+                    oled_canvas_write(string_buffer, string_length, true);
+                    memset(string_buffer, 0, string_length);
+                    if(i == 0){
+                        selected_row = i;
+                    }
+
+                    // Addition that prints the values of settings next to the menu items of them
+                    if(i >= 1 && i <= 1){
+                        sprintf(string_buffer, "%d", settings[i-1]);
+                        string_length = strlen(string_buffer);
+                        oled_canvas_write(string_buffer, string_length, true);
+                        memset(string_buffer, 0, string_length);
+                    }
+
+                    oled_canvas_write("\n", 1, true);
+                }
+
+                oled_canvas_invert_row(selected_row);
+                oled_canvas_show();
+            }else if(current_slave_settings == SLAVE_SETTINGS_FLIGHT_MODE){
+                printf("Rendering flight mode setting\n");
+
+                oled_canvas_clear();
+
+                oled_canvas_write("\n", 1, true);
+                oled_canvas_write("\n", 1, true);
+
+                sprintf(string_buffer, "\n\nFlight mode: %d\n", flight_mode);
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                oled_canvas_show();
+            }
         }
     }
-    
+
     // Print out the new screen after rotation of the rotary encoder
     if (((rotary_encoder_get_counter(rotary_encoder_1) != rotary_encoder_1_old_value && screen_enabled) || screen_enabled_old == false || current_remote_synced_to_slave != old_remote_synced_to_slave) && screen_enabled == true){
         rotary_encoder_1_new_value = rotary_encoder_get_counter(rotary_encoder_1);
@@ -925,7 +1049,7 @@ void screen_menu_logic(){
         }else if(current_mode == MODE_CONTROL){
             if(current_control == CONTROL_MODE_NONE){
                 printf("Rendering control REFRESH\n");
-                
+
                 oled_canvas_clear();
 
                 uint8_t selected_row = 0;
@@ -1108,7 +1232,7 @@ void screen_menu_logic(){
                 }else if(m_average_sample_size > MAX_AVERAGING_SAMPLE_SIZE){
                     m_average_sample_size = MAX_AVERAGING_SAMPLE_SIZE;
                 }
-                
+
                 // Update the joystick driver with the new value
                 joystick_set_averaging_sample_size(m_average_sample_size);
 
@@ -1192,6 +1316,62 @@ void screen_menu_logic(){
 
                 oled_canvas_show();
             }
+        }else if(current_mode == MODE_SLAVE_SETTINGS){
+            if(current_slave_settings == SLAVE_SETTINGS_NONE){
+                printf("Rendering slave settings\n");
+                oled_canvas_clear();
+
+                uint8_t selected_row = 0;
+                uint8_t size_slave_settings_strings = sizeof(slave_settings_strings) / sizeof(slave_settings_strings[0]);
+
+                uint8_t settings[1] = {
+                    flight_mode
+                };
+
+                for (size_t i = 0; i < size_slave_settings_strings; i++){
+                    sprintf(string_buffer, "%s", slave_settings_strings[i]);
+                    string_length = strlen(string_buffer);
+                    oled_canvas_write(string_buffer, string_length, true);
+                    memset(string_buffer, 0, string_length);
+                    if(positive_mod(rotary_encoder_1_new_value, size_slave_settings_strings) == i){
+                        selected_row = i;
+                    }
+
+                    // Addition that prints the values of settings next to the menu items of them
+                    if(i >= 1 && i <= 1){
+                        sprintf(string_buffer, "%d", settings[i-1]);
+                        string_length = strlen(string_buffer);
+                        oled_canvas_write(string_buffer, string_length, true);
+                        memset(string_buffer, 0, string_length);
+                    }
+
+                    oled_canvas_write("\n", 1, true);
+                }
+
+                oled_canvas_invert_row(selected_row);
+                oled_canvas_show();
+            }else if(current_slave_settings == SLAVE_SETTINGS_FLIGHT_MODE){
+                printf("Rendering flight mode setting\n");
+
+                oled_canvas_clear();
+
+                oled_canvas_write("\n", 1, true);
+                oled_canvas_write("\n", 1, true);
+
+                flight_mode = flight_mode + (rotary_encoder_1_new_value - rotary_encoder_1_old_value);
+                if(flight_mode <0){
+                    flight_mode = 0;
+                }else if(flight_mode > 15){
+                    flight_mode = 15;
+                }
+
+                sprintf(string_buffer, "\n\nFlight mode: %d\n", flight_mode);
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                oled_canvas_show();
+            }
         }
         // Update the old value to trigger the function next time
         rotary_encoder_1_old_value = rotary_encoder_1_new_value;
@@ -1224,6 +1404,11 @@ void screen_menu_logic(){
         action_apply_accelerometer_correction_to_slave = false;
         apply_accelerometer_correction_to_slave();
     }
+
+    if (action_apply_flight_mode){
+        action_apply_flight_mode = false;
+        apply_flight_mode_to_slave();
+    }
 }
 
 void button1_callback(){
@@ -1248,7 +1433,7 @@ void button1_callback(){
             throttle_safety_passed = false;
         }
 
-    // GOOD
+        // GOOD
     }else if(current_mode == MODE_CONTROL){
         if(current_control == CONTROL_MODE_NONE){
             printf("Clicked on CONTROL_MODE_NONE item\n");
@@ -1363,6 +1548,27 @@ void button1_callback(){
             printf("Clicked on CORRECT_BALANCE_MODE_X_AXIS item\n");
             current_correct_balance = CORRECT_BALANCE_MODE_NONE;
         }
+    }else if(current_mode == MODE_SLAVE_SETTINGS){
+        if(current_slave_settings == SLAVE_SETTINGS_NONE){
+            uint8_t size_slave_settings_strings = sizeof(slave_settings_strings) / sizeof(slave_settings_strings[0]);
+            uint16_t selected = positive_mod(rotary_encoder_1_new_value, size_slave_settings_strings);
+            current_slave_settings = selected;
+            printf("Clicked on SLAVE_SETTINGS_NONE item %d\n", selected);
+            if(selected == 0){
+                current_mode = MODE_MAIN;
+            }
+
+            if(current_slave_settings == SLAVE_SETTINGS_APPLY_TO_SLAVE){
+                printf("APPLY TO SLAVE\n");
+                action_apply_flight_mode = true;
+
+                current_slave_settings = SLAVE_SETTINGS_NONE;
+                refresh_page = false;
+            }
+        }else if(current_slave_settings == SLAVE_SETTINGS_FLIGHT_MODE){
+            printf("Clicked on SLAVE_SETTINGS_FLIGHT_MODE item\n");
+            current_slave_settings = SLAVE_SETTINGS_NONE;
+        }
     }
 
     if(refresh_page){
@@ -1387,17 +1593,17 @@ void button2_callback(){
 void apply_pid_to_slave(){
 
     char *string = generate_message_pid_values_nrf24(
-        m_added_proportional, 
-        m_added_integral, 
-        m_added_derivative, 
+        m_added_proportional,
+        m_added_integral,
+        m_added_derivative,
         m_added_master_gain
     );
-    
+
     printf("'%s'\n", string);
     if(nrf24_transmit((uint8_t *)string)){
         gpio_put(2, 1);
     }
-    
+
     free(string);
 }
 
@@ -1406,14 +1612,29 @@ void apply_accelerometer_correction_to_slave(){
 
     char *string = generate_message_accelerometer_corrections_nrf24(
         m_added_accelerometer_x_correction,
-        m_added_accelerometer_y_correction
+        m_added_accelerometer_y_correction);
+
+    printf("'%s'\n", string);
+    if(nrf24_transmit((uint8_t *)string)){
+        gpio_put(2, 1);
+    }
+
+    free(string);
+}
+
+
+
+void apply_flight_mode_to_slave(){
+
+    char *string = generate_message_flight_mode_selection_nrf24(
+        flight_mode
     );
 
     printf("'%s'\n", string);
     if(nrf24_transmit((uint8_t *)string)){
         gpio_put(2, 1);
     }
-    
+
     free(string);
 }
 
@@ -1446,7 +1667,7 @@ void sync_remote_with_slave(){
         sleep_ms(1);
     }
 
-    // If anything received do error correction on the data 
+    // If anything received do error correction on the data
     if(base_received_messages > 10){
         // Check one character at a time
         for (int i = 0; i < STRING_LENGTH; i++) {
@@ -1456,7 +1677,7 @@ void sync_remote_with_slave(){
             for (int j = 0; j < base_received_messages; j++) {
                 frequency[(unsigned char) base_received_copies[j][i]]++;
             }
-            
+
             int max_freq = 0;
             char most_frequent_char = 0;
             // Find the most abundant character
@@ -1483,7 +1704,7 @@ void sync_remote_with_slave(){
     }
 
     extract_pid_values(
-        base_corrected_string, 
+        base_corrected_string,
         strlen(base_corrected_string),
         &m_base_proportional,
         &m_base_integral,
@@ -1522,7 +1743,7 @@ void sync_remote_with_slave(){
         sleep_ms(1);
     }
 
-    // If anything received do error correction on the data 
+    // If anything received do error correction on the data
     if(added_received_messages > 10){
         // Check one character at a time
         for (int i = 0; i < STRING_LENGTH; i++) {
@@ -1532,7 +1753,7 @@ void sync_remote_with_slave(){
             for (int j = 0; j < added_received_messages; j++) {
                 frequency[(unsigned char) added_received_copies[j][i]]++;
             }
-            
+
             int max_freq = 0;
             char most_frequent_char = 0;
             // Find the most abundant character
@@ -1559,7 +1780,7 @@ void sync_remote_with_slave(){
     }
 
     extract_pid_values(
-        added_corrected_string, 
+        added_corrected_string,
         strlen(added_corrected_string),
         &m_added_proportional,
         &m_added_integral,
