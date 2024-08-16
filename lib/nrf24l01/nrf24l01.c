@@ -273,7 +273,7 @@ void nrf24_rx_mode(uint8_t *address, uint8_t channel){
 }
 
 // perform the transmission with specified data
-bool nrf24_transmit(uint8_t *data){
+bool  nrf24_transmit(uint8_t *data){
     write_register_multiple(W_TX_PAYLOAD, data, 32, true);
 	// sleep_ms(1);
 

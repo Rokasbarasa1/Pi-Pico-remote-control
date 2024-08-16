@@ -19,11 +19,6 @@
 #include "../lib/oled-display/oled-display.h"
 
 #define MAX_MESSAGE_LENGTH 100
-#define DIAL_PRECISION 0.1
-#define DIAL_PRECISION_DERIVATIVE 0.01
-#define DIAL_PRECISION_ACCELEROMETER_CORRECTION 0.0001
-
-
 
 void button1_callback();
 void button2_callback();
@@ -36,6 +31,7 @@ unsigned char* generate_message_joystick_nrf24_uint(uint throttle, uint yaw, uin
 unsigned char* generate_message_joystick_nrf24_float(float throttle, float yaw, float pitch, float roll);
 unsigned char* generate_message_pid_values_nrf24(double added_proportional, double added_integral, double added_derivative, double added_master_gain);
 unsigned char* generate_message_accelerometer_corrections_nrf24(double added_accelerometer_x_value, double added_accelerometer_y_value);
+unsigned char *generate_message_flight_mode_selection_nrf24(uint8_t flight_mode);
 uint16_t positive_mod(int32_t value, uint16_t value_modal);
 void check_throttle_safety();
 void extract_pid_values(char *request, uint8_t request_size, double *base_proportional, double *base_integral, double *base_derivative, double *base_master);
@@ -153,6 +149,7 @@ enum t_pid_tune_mode_edit {
     PID_TUNE_MODE_EDIT_INTEGRAL,
     PID_TUNE_MODE_EDIT_DERIVATIVE,
     PID_TUNE_MODE_EDIT_MASTER_GAIN,
+    PID_TUNE_MODE_EDIT_GAIN_PRECISION,
     PID_TUNE_MODE_EDIT_APPLY_TO_SLAVE,
 };
 uint8_t* pid_tune_mode_edit_strings[] = {
@@ -161,6 +158,7 @@ uint8_t* pid_tune_mode_edit_strings[] = {
     (uint8_t*)"Integral      ",
     (uint8_t*)"Derivative    ",
     (uint8_t*)"Master Gain   ",
+    (uint8_t*)"Gain precision",
     (uint8_t*)"Apply to slave",
 };
 
@@ -175,14 +173,16 @@ uint8_t* remote_settings_strings[] = {
 
 enum t_correct_balance_mode {
     CORRECT_BALANCE_MODE_NONE,
-    CORRECT_BALANCE_MODE_X_AXIS,
-    CORRECT_BALANCE_MODE_Y_AXIS,
+    CORRECT_BALANCE_MODE_ROLL,
+    CORRECT_BALANCE_MODE_PITCH,
+    CORRECT_BALANCE_MODE_OFFSET_PRECISION,
     CORRECT_BALANCE_MODE_APPLY_TO_SLAVE
 };
 uint8_t* correct_balance_strings[] = {
     (uint8_t*)"Back",
-    (uint8_t*)"X Axis      ",
-    (uint8_t*)"Y Axis      ",
+    (uint8_t*)"Roll     ",
+    (uint8_t*)"Pitch    ",
+    (uint8_t*)"Offset precision",
     (uint8_t*)"Apply to slave",
 };
 
@@ -236,6 +236,8 @@ volatile double m_base_proportional = 0;
 volatile double m_base_integral = 0;
 volatile double m_base_derivative = 0;
 volatile double m_base_master_gain = 0;
+volatile double m_pid_gains_precision = 0.1;
+volatile int8_t m_pid_gains_precision_power = -1;
 
 volatile double m_added_proportional = 0;
 volatile double m_added_integral = 0;
@@ -245,13 +247,17 @@ volatile double m_added_master_gain = 0;
 volatile double m_base_accelerometer_x_correction = 0;
 volatile double m_base_accelerometer_y_correction = 0;
 
-volatile double m_added_accelerometer_x_correction = 0;
-volatile double m_added_accelerometer_y_correction = 0;
+volatile double m_added_offset_roll = 0;
+volatile double m_added_offset_pitch = 0;
+volatile double m_added_offset_precision = 0.01;
+volatile int8_t m_added_offset_precision_power = -2;
+
+
 
 volatile uint8_t flight_mode = 0;
 
 // State of remote settings
-volatile uint8_t m_average_sample_size = 10;
+volatile uint8_t m_average_sample_size = 40;
 
 // State of triggered actions
 bool action_apply_pid_to_slave = false;
@@ -352,17 +358,6 @@ int main() {
                 gpio_put(2, 1);
             }
             free(string_float);
-
-            // m_throttle = (uint)joystick_get_throttle_percent();
-            // m_yaw = (uint)joystick_get_yaw_percent();
-            // m_pitch = (uint)joystick_get_pitch_percent();
-            // m_roll = (uint)joystick_get_roll_percent();
-            // char *string_uint = generate_message_joystick_nrf24_uint(m_throttle, m_yaw, m_pitch, m_roll);
-            // printf("'%s'\n", string_uint);
-            // if(nrf24_transmit(string_uint)){
-            //     gpio_put(2, 1);
-            // }
-            // free(string_uint);
         }
 
         handle_loop_timing();
@@ -493,7 +488,7 @@ unsigned char *generate_message_flight_mode_selection_nrf24(uint8_t flight_mode)
     int length = snprintf(
         NULL,
         0,
-        "/flight_mode/%d/  ",
+        "/fm/%d/     ",
         flight_mode
     );
 
@@ -504,7 +499,7 @@ unsigned char *generate_message_flight_mode_selection_nrf24(uint8_t flight_mode)
     snprintf(
         (char *)string,
         length + 1,
-        "/flight_mode/%d/  ",
+        "/fm/%d/     ",
         flight_mode
     );
 
@@ -627,8 +622,8 @@ void screen_menu_logic(){
                 uint8_t size_correct_balance_strings = sizeof(correct_balance_strings) / sizeof(correct_balance_strings[0]);
 
                 double corrections[2] = {
-                    m_base_accelerometer_x_correction+m_added_accelerometer_x_correction,
-                    m_base_accelerometer_y_correction+m_added_accelerometer_y_correction
+                    m_base_accelerometer_x_correction+m_added_offset_roll,
+                    m_base_accelerometer_y_correction+m_added_offset_pitch
                 };
 
                 for (size_t i = 0; i < size_correct_balance_strings; i++)
@@ -859,7 +854,23 @@ void screen_menu_logic(){
                 memset(string_buffer, 0, string_length);
 
                 oled_canvas_show();
+            }else if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_GAIN_PRECISION){
+                printf("Rendering pid gain precision\n");
+
+                oled_canvas_clear();
+
+                oled_canvas_write("\n", 1, true);
+                oled_canvas_write("Gain precision\n", strlen("Gain precision\n"), true);
+                oled_canvas_write("\n", 1, true);
+
+                sprintf(string_buffer, "Precision: %f\n", m_pid_gains_precision);
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                oled_canvas_show();
             }
+            
         }else if(current_remote_settings != old_remote_settings){
 
             old_remote_settings = current_remote_settings;
@@ -912,8 +923,8 @@ void screen_menu_logic(){
                 uint8_t size_correct_balance_strings = sizeof(correct_balance_strings) / sizeof(correct_balance_strings[0]);
 
                 double corrections[2] = {
-                    m_base_accelerometer_x_correction+m_added_accelerometer_x_correction,
-                    m_base_accelerometer_y_correction+m_added_accelerometer_y_correction
+                    m_base_accelerometer_x_correction+m_added_offset_roll,
+                    m_base_accelerometer_y_correction+m_added_offset_pitch
                 };
 
                 for (size_t i = 0; i < size_correct_balance_strings; i++){
@@ -938,29 +949,46 @@ void screen_menu_logic(){
 
                 oled_canvas_invert_row(selected_row);
                 oled_canvas_show();
-            }else if(current_correct_balance == CORRECT_BALANCE_MODE_X_AXIS){
-                printf("Rendering x axis correct\n");
+            }else if(current_correct_balance == CORRECT_BALANCE_MODE_ROLL){
+                printf("Rendering roll correct\n");
 
                 oled_canvas_clear();
 
                 oled_canvas_write("\n", 1, true);
-                oled_canvas_write("\n", 1, true);
+                oled_canvas_write("+ is roll right\n", strlen("+ is roll right\n"), true);
+                oled_canvas_write("- is roll left\n", strlen("- is roll left\n"), true);
 
-                sprintf(string_buffer, "X base: %3.4f\n\nX added: %3.4f\n", m_base_accelerometer_x_correction, m_added_accelerometer_x_correction);
+                sprintf(string_buffer, "roll added: %3.4f\n", m_added_offset_roll);
                 string_length = strlen(string_buffer);
                 oled_canvas_write(string_buffer, string_length, true);
                 memset(string_buffer, 0, string_length);
 
                 oled_canvas_show();
-            }else if(current_correct_balance == CORRECT_BALANCE_MODE_Y_AXIS){
-                printf("Rendering y axis correct\n");
+            }else if(current_correct_balance == CORRECT_BALANCE_MODE_PITCH){
+                printf("Rendering pitch correct\n");
 
                 oled_canvas_clear();
 
                 oled_canvas_write("\n", 1, true);
+                oled_canvas_write("+ is pitch forward\n", strlen("+ is pitch forward\n"), true);
+                oled_canvas_write("- is pitch back\n", strlen("- is pitch back\n"), true);
+
+                sprintf(string_buffer, "pitch added: %3.4f\n", m_added_offset_pitch);
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                oled_canvas_show();
+            }else if(current_correct_balance == CORRECT_BALANCE_MODE_OFFSET_PRECISION){
+                printf("Rendering offset precision\n");
+
+                oled_canvas_clear();
+
+                oled_canvas_write("\n", 1, true);
+                oled_canvas_write("Offset precision\n", strlen("Offset precision\n"), true);
                 oled_canvas_write("\n", 1, true);
 
-                sprintf(string_buffer, "Y base: %3.4f\n\nY added: %3.4f\n", m_base_accelerometer_x_correction, m_added_accelerometer_x_correction);
+                sprintf(string_buffer, "precision: %f\n", m_added_offset_precision);
                 string_length = strlen(string_buffer);
                 oled_canvas_write(string_buffer, string_length, true);
                 memset(string_buffer, 0, string_length);
@@ -1140,7 +1168,7 @@ void screen_menu_logic(){
 
                     oled_canvas_clear();
 
-                    m_added_proportional = m_added_proportional + ((rotary_encoder_1_new_value - rotary_encoder_1_old_value) * DIAL_PRECISION);
+                    m_added_proportional = m_added_proportional + ((rotary_encoder_1_new_value - rotary_encoder_1_old_value) * m_pid_gains_precision);
                     oled_canvas_write("\n", 1, true);
                     oled_canvas_write("\n", 1, true);
 
@@ -1155,7 +1183,7 @@ void screen_menu_logic(){
 
                     oled_canvas_clear();
 
-                    m_added_integral = m_added_integral + ((rotary_encoder_1_new_value - rotary_encoder_1_old_value) * DIAL_PRECISION);
+                    m_added_integral = m_added_integral + ((rotary_encoder_1_new_value - rotary_encoder_1_old_value) * m_pid_gains_precision);
                     oled_canvas_write("\n", 1, true);
                     oled_canvas_write("\n", 1, true);
 
@@ -1170,7 +1198,7 @@ void screen_menu_logic(){
 
                     oled_canvas_clear();
 
-                    m_added_derivative = m_added_derivative + ((rotary_encoder_1_new_value - rotary_encoder_1_old_value) * DIAL_PRECISION_DERIVATIVE);
+                    m_added_derivative = m_added_derivative + ((rotary_encoder_1_new_value - rotary_encoder_1_old_value) * m_pid_gains_precision);
                     oled_canvas_write("\n", 1, true);
                     oled_canvas_write("\n", 1, true);
 
@@ -1185,11 +1213,51 @@ void screen_menu_logic(){
 
                     oled_canvas_clear();
 
-                    m_added_master_gain = m_added_master_gain + ((rotary_encoder_1_new_value - rotary_encoder_1_old_value) * DIAL_PRECISION);
+                    m_added_master_gain = m_added_master_gain + ((rotary_encoder_1_new_value - rotary_encoder_1_old_value) * m_pid_gains_precision);
                     oled_canvas_write("\n", 1, true);
                     oled_canvas_write("\n", 1, true);
 
                     sprintf(string_buffer, "M base: %3.3f\n\nM added: %3.3f\n", m_base_master_gain, m_added_master_gain);
+                    string_length = strlen(string_buffer);
+                    oled_canvas_write(string_buffer, string_length, true);
+                    memset(string_buffer, 0, string_length);
+
+                    oled_canvas_show();
+                }else if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_GAIN_PRECISION){
+                    printf("Rendering pid gain precision\n");
+
+                    oled_canvas_clear();
+
+                    oled_canvas_write("\n", 1, true);
+                    oled_canvas_write("Gain precision\n", strlen("Gain precision\n"), true);
+                    oled_canvas_write("\n", 1, true);
+                    
+                    m_pid_gains_precision_power = m_pid_gains_precision_power + (rotary_encoder_1_new_value - rotary_encoder_1_old_value);
+
+                    uint8_t loop_amount = 0;
+                    int8_t sign = 0;
+
+                    if(m_pid_gains_precision_power >= 0){
+                        sign = 1;
+                        loop_amount = m_pid_gains_precision_power;
+                    }else if(m_pid_gains_precision_power < 0){
+                        sign = -1;
+                        loop_amount = -m_pid_gains_precision_power;
+                    }
+
+                    m_pid_gains_precision = 1;
+
+                    for (uint8_t i = 0; i < loop_amount; i++){
+
+                        if(sign == 1){
+                            m_pid_gains_precision *= 10;// 10^x. Where x is positive
+                        }else if(sign == -1){
+                            m_pid_gains_precision /= 10;// 10^x. Where x is negative 
+                        }
+                    }
+                
+
+                    sprintf(string_buffer, "Precision: %f\n", m_pid_gains_precision);
                     string_length = strlen(string_buffer);
                     oled_canvas_write(string_buffer, string_length, true);
                     memset(string_buffer, 0, string_length);
@@ -1256,8 +1324,8 @@ void screen_menu_logic(){
                 uint8_t size_correct_balance_strings = sizeof(correct_balance_strings) / sizeof(correct_balance_strings[0]);
 
                 double corrections[2] = {
-                    m_base_accelerometer_x_correction+m_added_accelerometer_x_correction,
-                    m_base_accelerometer_y_correction+m_added_accelerometer_y_correction
+                    m_base_accelerometer_x_correction+m_added_offset_roll,
+                    m_base_accelerometer_y_correction+m_added_offset_pitch
                 };
 
                 for (size_t i = 0; i < size_correct_balance_strings; i++)
@@ -1283,39 +1351,83 @@ void screen_menu_logic(){
 
                 oled_canvas_invert_row(selected_row);
                 oled_canvas_show();
-            }else if(current_correct_balance == CORRECT_BALANCE_MODE_X_AXIS){
+            }else if(current_correct_balance == CORRECT_BALANCE_MODE_ROLL){
                 printf("Rendering x axis correct REFRESH\n");
 
                 oled_canvas_clear();
 
                 oled_canvas_write("\n", 1, true);
-                oled_canvas_write("\n", 1, true);
+                oled_canvas_write("+ is roll right\n", strlen("+ is roll right\n"), true);
+                oled_canvas_write("- is roll left\n", strlen("- is roll left\n"), true);
 
-                m_added_accelerometer_x_correction = m_added_accelerometer_x_correction + ((rotary_encoder_1_new_value - rotary_encoder_1_old_value) * DIAL_PRECISION_ACCELEROMETER_CORRECTION);
+                m_added_offset_roll = m_added_offset_roll + ((rotary_encoder_1_new_value - rotary_encoder_1_old_value) * m_added_offset_precision);
 
-                sprintf(string_buffer, "X base: %3.4f\n\nX added: %3.4f\n", m_base_accelerometer_x_correction, m_added_accelerometer_x_correction);
+                sprintf(string_buffer, "roll added: %3.4f\n", m_added_offset_roll);
                 string_length = strlen(string_buffer);
                 oled_canvas_write(string_buffer, string_length, true);
                 memset(string_buffer, 0, string_length);
 
                 oled_canvas_show();
-            }else if(current_correct_balance == CORRECT_BALANCE_MODE_Y_AXIS){
-                printf("Rendering x axis correct REFRESH\n");
+            }else if(current_correct_balance == CORRECT_BALANCE_MODE_PITCH){
+                printf("Rendering Y axis correct REFRESH\n");
 
                 oled_canvas_clear();
 
                 oled_canvas_write("\n", 1, true);
+                oled_canvas_write("+ is pitch forward\n", strlen("+ is pitch forward\n"), true);
+                oled_canvas_write("- is pitch back\n", strlen("- is pitch back\n"), true);
+
+                m_added_offset_pitch = m_added_offset_pitch + ((rotary_encoder_1_new_value - rotary_encoder_1_old_value) * m_added_offset_precision);
+
+                sprintf(string_buffer, "pitch added: %3.4f\n", m_added_offset_pitch);
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                oled_canvas_show();
+            }else if(current_correct_balance == CORRECT_BALANCE_MODE_OFFSET_PRECISION){
+                printf("Rendering offset precision\n");
+
+                oled_canvas_clear();
+
+                oled_canvas_write("\n", 1, true);
+                oled_canvas_write("Offset precision\n", strlen("Offset precision\n"), true);
                 oled_canvas_write("\n", 1, true);
 
-                m_added_accelerometer_y_correction = m_added_accelerometer_y_correction + ((rotary_encoder_1_new_value - rotary_encoder_1_old_value) * DIAL_PRECISION_ACCELEROMETER_CORRECTION);
 
-                sprintf(string_buffer, "Y base: %3.4f\n\nY added: %3.4f\n", m_base_accelerometer_y_correction, m_added_accelerometer_y_correction);
+                m_added_offset_precision_power = m_added_offset_precision_power + (rotary_encoder_1_new_value - rotary_encoder_1_old_value);
+
+                uint8_t loop_amount = 0;
+                int8_t sign = 0;
+
+                if(m_added_offset_precision_power >= 0){
+                    sign = 1;
+                    loop_amount = m_added_offset_precision_power;
+                }else if(m_added_offset_precision_power < 0){
+                    sign = -1;
+                    loop_amount = -m_added_offset_precision_power;
+                }
+
+                m_added_offset_precision = 1;
+
+                for (uint8_t i = 0; i < loop_amount; i++){
+
+                    if(sign == 1){
+                        m_added_offset_precision *= 10;// 10^x. Where x is positive
+                    }else if(sign == -1){
+                        m_added_offset_precision /= 10;// 10^x. Where x is negative 
+                    }
+                }
+                
+
+                sprintf(string_buffer, "precision: %f\n", m_added_offset_precision);
                 string_length = strlen(string_buffer);
                 oled_canvas_write(string_buffer, string_length, true);
                 memset(string_buffer, 0, string_length);
 
                 oled_canvas_show();
             }
+                            
         }else if(current_mode == MODE_SLAVE_SETTINGS){
             if(current_slave_settings == SLAVE_SETTINGS_NONE){
                 printf("Rendering slave settings\n");
@@ -1508,6 +1620,9 @@ void button1_callback(){
             }else if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_MASTER_GAIN){
                 printf("Clicked on PID_TUNE_MODE_EDIT_MASTER_GAIN item\n");
                 current_pid_tune_edit = PID_TUNE_MODE_EDIT_NONE;
+            }else if(current_pid_tune_edit == PID_TUNE_MODE_EDIT_GAIN_PRECISION){
+                printf("Clicked on PID_TUNE_MODE_EDIT_GAIN_PRECISION item\n");
+                current_pid_tune_edit = PID_TUNE_MODE_EDIT_NONE;
             }
         }
     }else if(current_mode == MODE_REMOTE_SETTINGS){
@@ -1541,11 +1656,14 @@ void button1_callback(){
                 current_correct_balance = CORRECT_BALANCE_MODE_NONE;
                 refresh_page = false;
             }
-        }else if(current_correct_balance == CORRECT_BALANCE_MODE_X_AXIS){
-            printf("Clicked on CORRECT_BALANCE_MODE_X_AXIS item\n");
+        }else if(current_correct_balance == CORRECT_BALANCE_MODE_ROLL){
+            printf("Clicked on CORRECT_BALANCE_MODE_ROLL item\n");
             current_correct_balance = CORRECT_BALANCE_MODE_NONE;
-        }else if(current_correct_balance == CORRECT_BALANCE_MODE_Y_AXIS){
-            printf("Clicked on CORRECT_BALANCE_MODE_X_AXIS item\n");
+        }else if(current_correct_balance == CORRECT_BALANCE_MODE_PITCH){
+            printf("Clicked on CORRECT_BALANCE_MODE_ROLL item\n");
+            current_correct_balance = CORRECT_BALANCE_MODE_NONE;
+        }else if(current_correct_balance == CORRECT_BALANCE_MODE_OFFSET_PRECISION){
+            printf("Clicked on CORRECT_BALANCE_MODE_OFFSET_PRECISION item\n");
             current_correct_balance = CORRECT_BALANCE_MODE_NONE;
         }
     }else if(current_mode == MODE_SLAVE_SETTINGS){
@@ -1611,8 +1729,8 @@ void apply_accelerometer_correction_to_slave(){
     
 
     char *string = generate_message_accelerometer_corrections_nrf24(
-        m_added_accelerometer_x_correction,
-        m_added_accelerometer_y_correction);
+        m_added_offset_roll,
+        m_added_offset_pitch);
 
     printf("'%s'\n", string);
     if(nrf24_transmit((uint8_t *)string)){
