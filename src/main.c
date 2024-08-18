@@ -38,6 +38,7 @@ void extract_pid_values(char *request, uint8_t request_size, double *base_propor
 void init_loop_timer();
 void handle_loop_timing();
 void apply_flight_mode_to_slave();
+void apply_all_settings_to_slave();
 void apply_accelerometer_correction_to_slave();
 
 /**
@@ -189,12 +190,14 @@ uint8_t* correct_balance_strings[] = {
 enum t_slave_settings_mode{
     SLAVE_SETTINGS_NONE,
     SLAVE_SETTINGS_FLIGHT_MODE,
-    SLAVE_SETTINGS_APPLY_TO_SLAVE
+    SLAVE_SETTINGS_APPLY_TO_SLAVE,
+    SLAVE_SETTINGS_APPLY_ALL_SETTINGS
 };
 uint8_t *slave_settings_strings[] = {
     (uint8_t*)"Back",
     (uint8_t*)"Flight mode  ",
     (uint8_t*)"Apply to slave",
+    (uint8_t*)"Apply all settings",
 };
 
 // State of what menu is showing #####################################################
@@ -264,6 +267,8 @@ bool action_apply_pid_to_slave = false;
 bool action_sync_remote_to_slave = false;
 bool action_apply_accelerometer_correction_to_slave = false;
 bool action_apply_flight_mode = false;
+bool action_apply_all_settings = false;
+
 
 volatile char string_buffer[100];
 volatile uint8_t string_length = 0;
@@ -1521,6 +1526,11 @@ void screen_menu_logic(){
         action_apply_flight_mode = false;
         apply_flight_mode_to_slave();
     }
+
+    if (action_apply_all_settings){
+        action_apply_all_settings = false;
+
+    }
 }
 
 void button1_callback(){
@@ -1682,6 +1692,12 @@ void button1_callback(){
 
                 current_slave_settings = SLAVE_SETTINGS_NONE;
                 refresh_page = false;
+            }else if(current_slave_settings == SLAVE_SETTINGS_APPLY_ALL_SETTINGS){
+                printf("APPLY TO SLAVE\n");
+                action_apply_all_settings = true;
+
+                current_slave_settings = SLAVE_SETTINGS_NONE;
+                refresh_page = false;
             }
         }else if(current_slave_settings == SLAVE_SETTINGS_FLIGHT_MODE){
             printf("Clicked on SLAVE_SETTINGS_FLIGHT_MODE item\n");
@@ -1754,6 +1770,17 @@ void apply_flight_mode_to_slave(){
     }
 
     free(string);
+}
+
+
+void apply_all_settings_to_slave(){
+    apply_pid_to_slave();
+    sleep_ms(400);
+    apply_accelerometer_correction_to_slave();
+    sleep_ms(1000);
+    apply_flight_mode_to_slave();
+    sleep_ms(400);
+    printf("Applied all settings to slave\n");
 }
 
 #define NUM_COPIES 25
