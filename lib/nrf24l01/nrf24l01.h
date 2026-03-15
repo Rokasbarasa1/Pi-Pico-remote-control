@@ -48,7 +48,7 @@
 #define REUSE_TX_PL     0xE3
 #define NOP             0xFF
 
-bool nrf24_init(spi_inst_t *spi_temp, uint pin_csn_temp, uint pin_ce_temp, bool init_spi);
+bool nrf24_init(spi_inst_t *spi_temp, uint pin_csn_temp, uint pin_ce_temp, bool init_spi, bool use_crc);
 void nrf24_tx_mode (uint8_t *address, uint8_t channel);
 void nrf24_rx_mode(uint8_t *address, uint8_t channel);
 bool nrf24_data_available(int pipe_number);

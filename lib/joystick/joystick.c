@@ -207,6 +207,45 @@ uint16_t joystick_get_roll_raw(){
     return adc_roll;
 }
 
+// enum t_calibration_step {
+//     MAX_DEFLECT,
+//     MIN_DEFLECT,
+//     CENTER_DEFLECT,
+// };
+
+// void calibrate_joystick_pair(uint8_t mode){
+
+//     // The sticks are already deflected
+    
+//     uint16_t samples = 1000;
+//     // Get 50 samples of each
+//     float samples_joystick_A[samples];
+//     float samples_joystick_B[samples];
+
+//     float average_throttle_sum = 0.0;
+//     float average_yaw_sum = 0.0;
+
+//     for(uint8_t i = 0; i < samples; i++){
+//         average_throttle_sum = average_throttle_sum + (float) adc_throttle_array[i];
+//         average_yaw_sum = average_yaw_sum + (float) adc_yaw_array[i];
+//     }
+
+//     float average_throttle = average_throttle_sum / (float) samples;
+//     float average_yaw = average_yaw_sum / (float) samples;
+
+//     switch (expression)
+//     {
+//     case constant expression:
+//         /* code */
+//         break;
+    
+//     default:
+//         break;
+//     }
+//     if(mode == 0)
+
+// }
+
 
 float joystick_get_throttle_percent(){
     // Calculate the average adc value

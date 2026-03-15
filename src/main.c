@@ -5,7 +5,6 @@
 #include <stdlib.h>
 #include <math.h>
 #include <stdio.h>
-#include "pico/stdlib.h"
 #include "pico/binary_info.h"
 #include "hardware/i2c.h"
 #include "hardware/timer.h"
@@ -18,6 +17,10 @@
 #include "../lib/nrf24l01/nrf24l01.h"
 #include "../lib/oled-display/oled-display.h"
 
+
+#include "hardware/irq.h"
+#include "../lib/crsf/crsf.h"
+
 #define MAX_MESSAGE_LENGTH 100
 
 void button1_callback();
@@ -26,12 +29,20 @@ void screen_menu_logic();
 void apply_pid_to_slave();
 void sync_remote_with_slave();
 
-unsigned char* int_to_string(uint number);
-unsigned char* generate_message_joystick_nrf24_uint(uint throttle, uint yaw, uint roll, uint pitch);
-unsigned char* generate_message_joystick_nrf24_float(float throttle, float yaw, float roll, float pitch);
-unsigned char* generate_message_pid_values_nrf24(double added_proportional, double added_integral, double added_derivative, double added_master_gain);
-unsigned char* generate_message_accelerometer_corrections_nrf24(double added_accelerometer_x_value, double added_accelerometer_y_value);
-unsigned char *generate_message_flight_mode_selection_nrf24(uint8_t flight_mode);
+char* generate_message_joystick_nrf24_uint(uint throttle, uint yaw, uint roll, uint pitch);
+char* generate_message_joystick_nrf24_float(float throttle, float yaw, float roll, float pitch);
+char* generate_message_pid_values_nrf24(double added_proportional, double added_integral, double added_derivative, double added_master_gain);
+char* generate_message_accelerometer_corrections_nrf24(double added_accelerometer_x_value, double added_accelerometer_y_value);
+char* generate_message_flight_mode_selection_nrf24(uint8_t flight_mode);
+char* generate_message_calibrate_accelerometer_ellipsoid_nrf24();
+char* generate_message_calibrate_accelerometer_ellipsoid_stop_nrf24();
+char* generate_message_calibrate_accelerometer_level_nrf24();
+char* generate_message_calibrate_accelerometer_level_stop_nrf24();
+char* generate_message_calibrate_roll_pitch_offset_nrf24();
+char* generate_message_calibrate_roll_pitch_offset_stop_nrf24();
+char* generate_message_gps_speed_ff_nrf24(float gps_ff);
+
+
 uint16_t positive_mod(int32_t value, uint16_t value_modal);
 void check_throttle_safety();
 void extract_pid_values(char *request, uint8_t request_size, double *base_proportional, double *base_integral, double *base_derivative, double *base_master);
@@ -40,6 +51,14 @@ void handle_loop_timing();
 void apply_flight_mode_to_slave();
 void apply_all_settings_to_slave();
 void apply_accelerometer_correction_to_slave();
+void apply_calibrate_accelerometer_ellipsoid();
+void apply_calibrate_accelerometer_ellipsoid_stop();
+void apply_calibrate_accelerometer_level();
+void apply_calibrate_accelerometer_level_stop();
+void apply_calibrate_roll_pitch_offset();
+void apply_calibrate_roll_pitch_offset_stop();
+void apply_gps_speed_ff_to_slave();
+
 
 /**
  * SPI0 RADIO nRF24L01+
@@ -169,7 +188,8 @@ enum t_remote_settings_mode {
     REMOTE_SETTINGS_MODE_EDIT_SWAP_JOYSTICKS,
     REMOTE_SETTINGS_MODE_EDIT_STICK_CALIBRATION,
     REMOTE_SETTINGS_MODE_EDIT_STICK_DEADZONE,
-    REMOTE_SETTINGS_MODE_EDIT_THROTTLE_SAFETY
+    REMOTE_SETTINGS_MODE_EDIT_THROTTLE_SAFETY,
+    REMOTE_SETTINGS_MODE_EDIT_TURN_OFF_ROLL_PITCH
 };
 uint8_t* remote_settings_strings[] = {
     (uint8_t*)"Back",
@@ -178,6 +198,7 @@ uint8_t* remote_settings_strings[] = {
     (uint8_t*)"Stick calibration",
     (uint8_t*)"Stick deadzone",
     (uint8_t*)"Throttle safety",
+    (uint8_t*)"Turn off roll pitch",
 };
 
 enum t_correct_balance_mode {
@@ -199,14 +220,56 @@ enum t_slave_settings_mode{
     SLAVE_SETTINGS_NONE,
     SLAVE_SETTINGS_FLIGHT_MODE,
     SLAVE_SETTINGS_APPLY_TO_SLAVE,
-    SLAVE_SETTINGS_APPLY_ALL_SETTINGS
+    SLAVE_SETTINGS_APPLY_ALL_SETTINGS,
+    SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_ELLIPSOID,
+    SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_LEVEL,
+    SLAVE_SETTINGS_CALIBRATE_ROLL_PITCH_OFFSETS,
+    SLAVE_SETTINGS_GPS_SPEED_FF
 };
+
 uint8_t *slave_settings_strings[] = {
     (uint8_t*)"Back",
     (uint8_t*)"Flight mode  ",
     (uint8_t*)"Apply to slave",
     (uint8_t*)"Apply all settings",
+    (uint8_t*)"Cal accel ellipsoid",
+    (uint8_t*)"Cal accel level",
+    (uint8_t*)"Cal roll-pitch offs",
+    (uint8_t*)"GPS speed FF",
 };
+
+
+
+enum t_slave_settings_calibrate_accelerometer_ellipsoid_mode{
+    SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_ELLIPSOID_CONTINUE,
+    SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_ELLIPSOID_STOP
+};
+
+uint8_t *slave_settings_calibrate_accelerometer_ellipsoid_strings[] = {
+    (uint8_t*)"Continue",
+    (uint8_t*)"Stop"
+};
+
+enum t_slave_settings_calibrate_accelerometer_level_mode{
+    SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_LEVEL_CONTINUE,
+    SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_LEVEL_STOP
+};
+
+uint8_t *slave_settings_calibrate_accelerometer_level_strings[] = {
+    (uint8_t*)"Continue",
+    (uint8_t*)"Stop"
+};
+
+enum t_slave_settings_calibrate_roll_pitch_offsets_mode{
+    SLAVE_SETTINGS_CALIBRATE_ROLL_PITCH_OFFSETS_CONTINUE,
+    SLAVE_SETTINGS_CALIBRATE_ROLL_PITCH_OFFSETS_STOP
+};
+
+uint8_t *slave_settings_calibrate_roll_pitch_offsets_strings[] = {
+    (uint8_t*)"Continue",
+    (uint8_t*)"Stop"
+};
+
 
 // State of what menu is showing #####################################################
 enum t_mode current_mode = MODE_MAIN;
@@ -229,6 +292,15 @@ enum t_correct_balance_mode old_correct_balance = CORRECT_BALANCE_MODE_NONE;
 
 enum t_slave_settings_mode current_slave_settings = SLAVE_SETTINGS_NONE;
 enum t_slave_settings_mode old_slave_settings = SLAVE_SETTINGS_NONE;
+
+enum t_slave_settings_calibrate_accelerometer_ellipsoid_mode current_slave_settings_calibrate_accelerometer_ellipsoid = SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_ELLIPSOID_CONTINUE;
+enum t_slave_settings_calibrate_accelerometer_ellipsoid_mode old_slave_settings_calibrate_accelerometer_ellipsoid = SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_ELLIPSOID_CONTINUE;
+
+enum t_slave_settings_calibrate_accelerometer_level_mode current_slave_settings_calibrate_accelerometer_level = SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_LEVEL_CONTINUE;
+enum t_slave_settings_calibrate_accelerometer_level_mode old_slave_settings_calibrate_accelerometer_level = SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_LEVEL_CONTINUE;
+
+enum t_slave_settings_calibrate_roll_pitch_offsets_mode current_slave_settings_calibrate_roll_pitch_offsets = SLAVE_SETTINGS_CALIBRATE_ROLL_PITCH_OFFSETS_CONTINUE;
+enum t_slave_settings_calibrate_roll_pitch_offsets_mode old_slave_settings_calibrate_roll_pitch_offsets = SLAVE_SETTINGS_CALIBRATE_ROLL_PITCH_OFFSETS_CONTINUE;
 
 // State of the rotary encoder and changes ###############################################
 
@@ -266,14 +338,18 @@ volatile int8_t m_added_offset_precision_power = -2;
 
 
 volatile uint8_t flight_mode = 0;
+volatile float gps_speed_ff = 0.0f;
+float gps_speed_ff_precision = 0.01;
 
 // State of remote settings
-volatile uint8_t m_average_sample_size = 10;
+volatile uint8_t m_average_sample_size = 50;
 volatile uint8_t m_joystick_swap = 0;
-volatile float m_joystick_deadzone_symetrical = 5;
+volatile float m_joystick_deadzone_symetrical = 10;
 volatile double m_joystock_deadzone_precision = 0.1;
 
 float m_throttle_safety_value = 0.0f;
+
+volatile uint8_t m_turn_off_roll_pitch = 0;
 
 // State of triggered actions
 bool action_apply_pid_to_slave = false;
@@ -281,6 +357,13 @@ bool action_sync_remote_to_slave = false;
 bool action_apply_accelerometer_correction_to_slave = false;
 bool action_apply_flight_mode = false;
 bool action_apply_all_settings = false;
+bool action_calibrate_accelerometer_ellipsoid = false;
+bool action_calibrate_accelerometer_ellipsoid_stop = false;
+bool action_calibrate_accelerometer_level = false;
+bool action_calibrate_accelerometer_level_stop = false;
+bool action_calibrate_roll_pitch_offset = false;
+bool action_calibrate_roll_pitch_offset_stop = false;
+bool action_gps_speed_ff_to_slave = false;
 
 
 volatile char string_buffer[100];
@@ -301,13 +384,73 @@ uint32_t loop_start_time = 0;
 uint32_t loop_end_time = 0;
 int16_t delta_loop_time = 0;
 
+// Calbirate accelerometer
+// 0 - none
+// 1 - accelerometer ellipsoid
+// 2 - accelerometer level
+uint8_t calibration_type = 0;
+
+uint8_t calibration_step = 0;
+
+
+uint8_t accelerometer_ellipsoid_calibration_steps = 6;
+uint8_t accelerometer_level_calibration_steps = 4;
+uint8_t roll_pitch_offset_calibration_steps = 4;
+
+
+
 #define REFRESH_RATE_HZ 200
+
+
+
+
+
+
+
+
+// Define the UART instance and GPIO pin
+// #define UART_ID uart0
+// #define UART_TX_RX_PIN 17
+
+// void single_wire_uart_init() {
+//     // Initialize the chosen serial port (UART0) at 115200 baud for CRSF
+//     uart_init(UART_ID, 115200);
+
+//     // Set the GPIO pin to the UART TX function
+//     gpio_set_function(UART_TX_RX_PIN, GPIO_FUNC_UART);
+
+//     // Set the UART format to 8 bits, 1 stop bit, no parity
+//     uart_set_format(UART_ID, 8, 1, UART_PARITY_NONE);
+
+//     // Disable UART flow control for CRSF
+//     uart_set_hw_flow(UART_ID, false, false);
+// }
+
+// void single_wire_uart_putc(char c) {
+//     // Set the GPIO pin to output mode for transmitting
+//     gpio_set_dir(UART_TX_RX_PIN, true);
+
+//     // Transmit the character
+//     uart_putc_raw(UART_ID, c);
+// }
+
+// char single_wire_uart_getc() {
+//     // Set the GPIO pin to input mode for receiving
+//     gpio_set_dir(UART_TX_RX_PIN, false);
+
+//     // Receive the character
+//     return uart_getc(UART_ID);
+// }
+
+
+
+bool rerender_page = false;
+
 
 int main() {
     stdio_init_all();
 
     // Sleep a so you actually have time to read some of the serial outputs
-    // sleep_ms(2500); // For debugging
     printf("STARTING PROGRAM\n");
 
     // ########################################################## status led
@@ -329,7 +472,7 @@ int main() {
     printf("Buttons initialized\n");
 
     // ########################################################## Rotary encoders
-    rotary_encoder_1 = init_rotary_encoder(12, 13);
+    rotary_encoder_1 = init_rotary_encoder(20, 13);
     rotary_encoder_2 = init_rotary_encoder(10, 11);
 
     rotary_encoder_1_old_value = rotary_encoder_get_counter(rotary_encoder_1);
@@ -344,32 +487,123 @@ int main() {
     printf("Oled initialized\n");
 
     // ########################################################## Setup radio communication
-    if(nrf24_init(spi_default, 7, 8, true)){
+    if(nrf24_init(spi_default, 7, 8, true, true)){
         printf("nrf24 setup succeeded\n");
     }else{
         printf("nrf24 setup failed\n");
     }
-
     nrf24_tx_mode(tx_address, 10);
 
     printf("Radio initialized\n");
 
+
+
+
+    
+
+
+
+
+
+
+
+    printf("TEST\n");
+
+
+
+
     // ########################################################## Main loop
     printf("Looping\n");
     init_loop_timer();
+
+
+
+
+    // uart_init(uart0, 115200);
+
+    // gpio_set_function(17, GPIO_FUNC_UART);
+    // gpio_set_function(12, GPIO_FUNC_UART);
+
+    // uart_set_hw_flow(uart0, false, false);
+    // uart_set_format(uart0, 8, 1, UART_PARITY_NONE);
+    // uart_set_fifo_enabled(uart0, false);
+    
+    // // irq_set_exclusive_handler(UART0_IRQ , on_uart_rx);
+    // // irq_set_enabled(UART0_IRQ, true);
+    // // uart_set_irq_enables(uart0, true, false);
+
+    // while(1){
+    //     uart_puts(uart0, "\nHello, uart interrupts\n");
+    //     // single_wire_uart_putc('H');
+    //     // single_wire_uart_putc('H');
+    //     // single_wire_uart_putc('H');
+    //     // single_wire_uart_putc('H');
+    //     // single_wire_uart_putc('H');
+    //     // single_wire_uart_putc('H');
+    //     // single_wire_uart_putc('\n');
+    //     sleep_ms(1000);
+    // }
+
+    // crsf_init(uart0, 17, 12);
+
+    // while(1){
+    //     oled_canvas_clear();
+    //     uint8_t index_offset = 0;
+
+    //     if(csrf_receive_data_blocking()){
+    //         // printf("Got some crsf data\n");
+    //         sprintf(string_buffer + index_offset , "Got some crsf data\n");
+    //         index_offset = strlen(string_buffer);
+
+    //         if(csrf_process_rx_data_into_payload()){
+    //             // printf("Processed data\n");
+    //             sprintf(string_buffer + index_offset , "Processed data\n");
+    //             index_offset = strlen(string_buffer);
+    //         }else{
+    //             // printf("Error in processing data\n");
+    //             sprintf(string_buffer + index_offset , "Error in processing data\n");
+    //             index_offset = strlen(string_buffer);
+    //         }
+    //     }else{
+    //         // printf("Got no crsf data\n");
+    //         sprintf(string_buffer + index_offset , "Got no crsf data\n");
+    //         index_offset = strlen(string_buffer);
+    //     }
+
+    //     string_length = strlen(string_buffer);
+    //     oled_canvas_write(string_buffer, string_length, true);
+    //     memset(string_buffer, 0, string_length);
+
+    //     oled_canvas_show();
+    // }
+    
+
     while (true) {
+
+
         screen_menu_logic();
+
+
+
         if(current_mode == MODE_CONTROL){
             if(!m_joystick_swap){
                 m_float_throttle = joystick_get_throttle_percent();
                 m_float_yaw = joystick_get_yaw_percent();
                 m_float_pitch = joystick_get_pitch_percent();
                 m_float_roll = joystick_get_roll_percent();
+                if(m_turn_off_roll_pitch){
+                    m_float_pitch = 50.0f;
+                    m_float_roll = 50.0f;
+                }
             }else if(m_joystick_swap){
                 m_float_pitch = joystick_get_throttle_percent();
                 m_float_roll = joystick_get_yaw_percent();
                 m_float_throttle = joystick_get_pitch_percent();
                 m_float_yaw = joystick_get_roll_percent();
+                if(m_turn_off_roll_pitch){
+                    m_float_throttle = 0;
+                    m_float_yaw = 50.0f;
+                }
             }
 
             // PITCH HAS AN OFFSET OF +2 at the bottom position preventing the drone from arming in swap joysticks mode_select_strings
@@ -381,7 +615,7 @@ int main() {
 
             char *string_float = generate_message_joystick_nrf24_float(m_float_throttle, m_float_yaw, m_float_roll, m_float_pitch);
             // printf("'%s'\n", string_float);
-            if(nrf24_transmit(string_float)){
+            if(nrf24_transmit((uint8_t *)string_float)){
                 gpio_put(2, 1);
             }
             free(string_float);
@@ -434,110 +668,187 @@ void check_throttle_safety(){
     }
 }
 
-unsigned char* generate_message_joystick_nrf24_uint(uint throttle, uint yaw, uint roll, uint pitch){
-    // calculate the length of the resulting string
-    int length = snprintf(NULL, 0, "/js/%u/%u/%u/%u/  ", throttle, yaw, roll, pitch);
+char* generate_message_joystick_nrf24_uint(uint throttle, uint yaw, uint roll, uint pitch){
+    char *message = malloc(32);
 
-    // allocate memory for the string
-    unsigned char *string = malloc(length + 1); // +1 for the null terminator
+    snprintf(message, 32, "/js/%u/%u/%u/%u/", throttle, yaw, roll, pitch);
 
-    // format the string
-    snprintf((char*)string, length + 1, "/js/%u/%u/%u/%u/  ", throttle, yaw, roll, pitch);
+    size_t len = strlen(message);
+    if (len < 32) {
+         memset(message + len, ' ', 32 - len);
+    }
 
-    return string;
+    return message;
 }
 
-unsigned char* generate_message_joystick_nrf24_float(float throttle, float yaw, float roll, float pitch){
-    // calculate the length of the resulting string
-    int length = snprintf(NULL, 0, "/js/%3.1f/%3.1f/%3.1f/%3.1f/  ", throttle, yaw, roll, pitch);
+char* generate_message_joystick_nrf24_float(float throttle, float yaw, float roll, float pitch){
+    char *message = malloc(32);
 
-    // allocate memory for the string
-    unsigned char *string = malloc(length + 1); // +1 for the null terminator
+    snprintf(message, 32, "/js/%3.1f/%3.1f/%3.1f/%3.1f/", throttle, yaw, roll, pitch);
 
-    // format the string
-    snprintf((char*)string, length + 1, "/js/%3.1f/%3.1f/%3.1f/%3.1f/  ", throttle, yaw, roll, pitch);
+    size_t len = strlen(message);
+    if (len < 32) {
+         memset(message + len, ' ', 32 - len);
+    }
 
-    // There is no point optimizing this: (4 bytes float) * 4 + (1 byte slash) * 4 + 1 byte data type = 21
-    // Raw string takes the same size + 3 bytes more
-    return string;
+    return message;
 }
 
-unsigned char* generate_message_pid_values_nrf24(double added_proportional, double added_integral, double added_derivative, double added_master_gain){
-    // calculate the length of the resulting string
-    int length = snprintf(
-        NULL,
-        0,
-        "/pid/%.2f/%.2f/%.2f/%.2f/  ",
+char* generate_message_pid_values_nrf24(double added_proportional, double added_integral, double added_derivative, double added_master_gain){
+    
+    char *message = malloc(32);
+
+    snprintf(message, 32, 
+        "/pid/%.2f/%.2f/%.2f/%.2f/",
         added_proportional,
         added_integral,
         added_derivative,
         added_master_gain
     );
 
-    // allocate memory for the string
-    unsigned char *string = malloc(length + 1); // +1 for the null terminator
+    size_t len = strlen(message);
+    if (len < 32) {
+            memset(message + len, ' ', 32 - len);
+    }
 
-    // format the string
-    snprintf(
-        (char*)string, 
-        length + 1,
-        "/pid/%.2f/%.2f/%.2f/%.2f/  ",
-        added_proportional,
-        added_integral,
-        added_derivative,
-        added_master_gain
-    );
-
-    return string;
+    return message;
 }
 
-unsigned char* generate_message_accelerometer_corrections_nrf24(double added_accelerometer_x, double added_accelerometer_y){
-    // calculate the length of the resulting string
-    int length = snprintf(
-        NULL,
-        0,
-        "/accel/%.4f/%.4f/  ",
+char* generate_message_accelerometer_corrections_nrf24(double added_accelerometer_x, double added_accelerometer_y){
+    
+    char *message = malloc(32);
+
+    snprintf(message, 32, 
+        "/accel/%.4f/%.4f/",
         added_accelerometer_x,
         added_accelerometer_y
     );
 
-    // allocate memory for the string
-    unsigned char *string = malloc(length + 1); // +1 for the null terminator
+    size_t len = strlen(message);
+    if (len < 32) {
+            memset(message + len, ' ', 32 - len);
+    }
 
-    // format the string
-    snprintf(
-        (char*)string, 
-        length + 1,
-        "/accel/%.4f/%.4f/  ",
-        added_accelerometer_x,
-        added_accelerometer_y
-    );
-
-    return string;
+    return message;
 }
 
-unsigned char *generate_message_flight_mode_selection_nrf24(uint8_t flight_mode){
-    // calculate the length of the resulting string
-    int length = snprintf(
-        NULL,
-        0,
-        "/fm/%d/     ",
+char* generate_message_flight_mode_selection_nrf24(uint8_t flight_mode){
+
+    char *message = malloc(32);
+
+    snprintf(message, 32, 
+        "/fm/%d/",
         flight_mode
     );
 
-    // allocate memory for the string
-    unsigned char *string = malloc(length + 1); // +1 for the null terminator
+    size_t len = strlen(message);
+    if (len < 32) {
+            memset(message + len, ' ', 32 - len);
+    }
 
-    // format the string
-    snprintf(
-        (char *)string,
-        length + 1,
-        "/fm/%d/     ",
-        flight_mode
-    );
-
-    return string;
+    return message;
 }
+
+char* generate_message_calibrate_accelerometer_ellipsoid_nrf24(){
+
+    char *message = malloc(32);
+
+    snprintf(message, 32, "/calAccEllipsoid/");
+
+    size_t len = strlen(message);
+    if (len < 32) {
+        memset(message + len, ' ', 32 - len);
+    }
+
+    return message;
+}
+
+
+char* generate_message_calibrate_accelerometer_ellipsoid_stop_nrf24(){
+
+    char *message = malloc(32);
+
+    snprintf(message, 32, "/calAccEllipsoidStop/");
+
+    size_t len = strlen(message);
+    if (len < 32) {
+        memset(message + len, ' ', 32 - len);
+    }
+
+    return message;
+}
+
+char* generate_message_calibrate_accelerometer_level_nrf24(){
+
+    char *message = malloc(32);
+
+    snprintf(message, 32, "/calAccLevel/");
+
+    size_t len = strlen(message);
+    if (len < 32) {
+        memset(message + len, ' ', 32 - len);
+    }
+
+    return message;
+}
+
+char* generate_message_calibrate_accelerometer_level_stop_nrf24(){
+
+    char *message = malloc(32);
+
+    snprintf(message, 32, "/calAccLevelStop/");
+
+    size_t len = strlen(message);
+    if (len < 32) {
+        memset(message + len, ' ', 32 - len);
+    }
+
+    return message;
+}
+
+char* generate_message_calibrate_roll_pitch_offset_nrf24(){
+
+    char *message = malloc(32);
+
+    snprintf(message, 32, "/calRollPitch/");
+
+    size_t len = strlen(message);
+    if (len < 32) {
+        memset(message + len, ' ', 32 - len);
+    }
+
+    return message;
+}
+
+
+char* generate_message_calibrate_roll_pitch_offset_stop_nrf24(){
+
+    char *message = malloc(32);
+
+    snprintf(message, 32, "/calRollPitchStop/");
+
+    size_t len = strlen(message);
+    if (len < 32) {
+        memset(message + len, ' ', 32 - len);
+    }
+
+    return message;
+}
+
+char* generate_message_gps_speed_ff_nrf24(float gps_ff){
+    char *message = malloc(32);
+
+    snprintf(message, 32, "/gpsff/%f/", gps_ff);
+
+    size_t len = strlen(message);
+    if (len < 32) {
+        memset(message + len, ' ', 32 - len);
+    }
+
+    return message;
+}
+
+
 
 void screen_menu_logic(){
     // Print out the new screen after button click. Also is triggered when screen goes from off to on
@@ -549,7 +860,7 @@ void screen_menu_logic(){
          current_pid_tune_edit != old_pid_tune_edit ||
          current_correct_balance != old_correct_balance ||
          current_slave_settings != old_slave_settings) &&
-        screen_enabled
+         screen_enabled
     ){
 
         if(current_mode != old_mode){
@@ -1000,6 +1311,20 @@ void screen_menu_logic(){
                 memset(string_buffer, 0, string_length);
 
                 oled_canvas_show();
+            }else if(current_remote_settings == REMOTE_SETTINGS_MODE_EDIT_TURN_OFF_ROLL_PITCH){
+                printf("Rendering remote settings turn off roll pitch setting\n");
+
+                oled_canvas_clear();
+
+                oled_canvas_write("\n", 1, true);
+                oled_canvas_write("\n", 1, true);
+
+                sprintf(string_buffer, "Turn off roll and pitch:\n%s\n", m_turn_off_roll_pitch ? "ON" : "OFF");
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                oled_canvas_show();
             }
         }else if(current_correct_balance != old_correct_balance){
             old_correct_balance = current_correct_balance;
@@ -1134,12 +1459,169 @@ void screen_menu_logic(){
                 memset(string_buffer, 0, string_length);
 
                 oled_canvas_show();
+            }else if(current_slave_settings == SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_ELLIPSOID){
+                printf("Rendering slave settings calibrate accelerometer ellipsoid\n");
+                oled_canvas_clear();
+
+                uint8_t selected_row = 0;
+                uint8_t size_slave_settings_calibrate_accelerometer_ellipsoid_strings = sizeof(slave_settings_calibrate_accelerometer_ellipsoid_strings) / sizeof(slave_settings_calibrate_accelerometer_ellipsoid_strings[0]);
+
+                sprintf(string_buffer, "Calibrate Ellipsoid:\n");
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                if(calibration_step == 0){
+                    sprintf(string_buffer, "Place Upside down\n\n");
+                }else if(calibration_step == 1){
+                    sprintf(string_buffer, "Place Left\n\n");
+                }else if(calibration_step == 2){
+                    sprintf(string_buffer, "Place Right\n\n");
+                }else if(calibration_step == 3){
+                    sprintf(string_buffer, "Place Nose down\n\n");
+                }else if(calibration_step == 4){
+                    sprintf(string_buffer, "Place Nose up\n\n");
+                }else if(calibration_step == 5){
+                    sprintf(string_buffer, "Place Flat\n\n");
+                }else if(calibration_step == 6){
+                    sprintf(string_buffer, "DONE\n\n");
+                }
+
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                for (size_t i = 0; i < size_slave_settings_calibrate_accelerometer_ellipsoid_strings; i++){
+                    sprintf(string_buffer, "%s", slave_settings_calibrate_accelerometer_ellipsoid_strings[i]);
+                    string_length = strlen(string_buffer);
+                    oled_canvas_write(string_buffer, string_length, true);
+                    memset(string_buffer, 0, string_length);
+                    if(i == 0){
+                        selected_row = i+3;
+                    }
+
+                    oled_canvas_write("\n", 1, true);
+                }
+
+                oled_canvas_invert_row(selected_row);
+                oled_canvas_show();
+            }else if(current_slave_settings == SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_LEVEL){
+                printf("Rendering slave settings calibrate accelerometer level\n");
+                oled_canvas_clear();
+
+                uint8_t selected_row = 0;
+                uint8_t size_slave_settings_calibrate_accelerometer_level_strings = sizeof(slave_settings_calibrate_accelerometer_level_strings) / sizeof(slave_settings_calibrate_accelerometer_level_strings[0]);
+
+                sprintf(string_buffer, "Calibrate Level:\n");
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                if(calibration_step == 0){
+                    sprintf(string_buffer, "#1 Place Flat\n\n");
+                }else if(calibration_step == 1){
+                    sprintf(string_buffer, "#2 Rotate +90 deg\n\n");
+                }else if(calibration_step == 2){
+                    sprintf(string_buffer, "#3 Rotate +90 deg\n\n");
+                }else if(calibration_step == 3){
+                    sprintf(string_buffer, "#4 Rotate +90 deg\n\n");
+                }else if(calibration_step == 4){
+                    sprintf(string_buffer, "DONE\n\n");
+                }
+
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                for (size_t i = 0; i < size_slave_settings_calibrate_accelerometer_level_strings; i++){
+                    sprintf(string_buffer, "%s", slave_settings_calibrate_accelerometer_level_strings[i]);
+                    string_length = strlen(string_buffer);
+                    oled_canvas_write(string_buffer, string_length, true);
+                    memset(string_buffer, 0, string_length);
+                    if(i == 0){
+                        selected_row = i+3;
+                    }
+
+                    oled_canvas_write("\n", 1, true);
+                }
+
+                oled_canvas_invert_row(selected_row);
+                oled_canvas_show();
+            }else if(current_slave_settings == SLAVE_SETTINGS_CALIBRATE_ROLL_PITCH_OFFSETS){
+                printf("Rendering slave settings calibrate roll pitch offsets\n");
+                oled_canvas_clear();
+
+                uint8_t selected_row = 0;
+                uint8_t size_slave_settings_calibrate_roll_pitch_offsets_strings = sizeof(slave_settings_calibrate_roll_pitch_offsets_strings) / sizeof(slave_settings_calibrate_roll_pitch_offsets_strings[0]);
+
+                sprintf(string_buffer, "Roll Pitch off:\n");
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                if(calibration_step == 0){
+                    sprintf(string_buffer, "#1 Place Flat\n\n");
+                }else if(calibration_step == 1){
+                    sprintf(string_buffer, "#2 Rotate +90 deg\n\n");
+                }else if(calibration_step == 2){
+                    sprintf(string_buffer, "#3 Rotate +90 deg\n\n");
+                }else if(calibration_step == 3){
+                    sprintf(string_buffer, "#4 Rotate +90 deg\n\n");
+                }else if(calibration_step == 4){
+                    sprintf(string_buffer, "DONE\n\n");
+                }
+
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                for (size_t i = 0; i < size_slave_settings_calibrate_roll_pitch_offsets_strings; i++){
+                    sprintf(string_buffer, "%s", slave_settings_calibrate_roll_pitch_offsets_strings[i]);
+                    string_length = strlen(string_buffer);
+                    oled_canvas_write(string_buffer, string_length, true);
+                    memset(string_buffer, 0, string_length);
+                    if(i == 0){
+                        selected_row = i+3;
+                    }
+
+                    oled_canvas_write("\n", 1, true);
+                }
+
+                oled_canvas_invert_row(selected_row);
+                oled_canvas_show();
+            }else if(current_slave_settings == SLAVE_SETTINGS_GPS_SPEED_FF){
+                printf("Rendering GPS speed FF setting\n");
+
+                oled_canvas_clear();
+
+                oled_canvas_write("\n", 1, true);
+                oled_canvas_write("\n", 1, true);
+
+                sprintf(string_buffer, "\n\nFF gain: %.2f\n", gps_speed_ff);
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                oled_canvas_show();
             }
+
         }
     }
 
     // Print out the new screen after rotation of the rotary encoder
-    if (((rotary_encoder_get_counter(rotary_encoder_1) != rotary_encoder_1_old_value && screen_enabled) || screen_enabled_old == false || current_remote_synced_to_slave != old_remote_synced_to_slave) && screen_enabled == true){
+    if (
+        (   rerender_page ||
+            (rotary_encoder_get_counter(rotary_encoder_1) != rotary_encoder_1_old_value && screen_enabled) || 
+            screen_enabled_old == false || 
+            current_remote_synced_to_slave != old_remote_synced_to_slave
+        ) && 
+        screen_enabled == true
+    ){
+
+        if(rerender_page){
+            rerender_page = false;
+        }
+
         rotary_encoder_1_new_value = rotary_encoder_get_counter(rotary_encoder_1);
 
         if(current_mode == MODE_MAIN){
@@ -1472,6 +1954,22 @@ void screen_menu_logic(){
                 memset(string_buffer, 0, string_length);
 
                 oled_canvas_show();
+            }else if(current_remote_settings == REMOTE_SETTINGS_MODE_EDIT_TURN_OFF_ROLL_PITCH){
+                printf("Rendering remote settings turn off roll pitch REFRESH\n");
+
+                oled_canvas_clear();
+
+                m_turn_off_roll_pitch = !m_turn_off_roll_pitch;
+
+                oled_canvas_write("\n", 1, true);
+                oled_canvas_write("\n", 1, true);
+
+                sprintf(string_buffer, "Turn off roll and pitch:\n%s\n", m_turn_off_roll_pitch ? "ON" : "OFF");
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                oled_canvas_show();
             }
 
         }else if(current_mode == MODE_CORRECT_BALANCE){
@@ -1642,6 +2140,159 @@ void screen_menu_logic(){
                 memset(string_buffer, 0, string_length);
 
                 oled_canvas_show();
+            }else if(current_slave_settings == SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_ELLIPSOID){
+                printf("Re-Rendering slave settings calibrate accelerometer ellipsoid\n");
+                oled_canvas_clear();
+
+                uint8_t selected_row = 0;
+                uint8_t size_slave_settings_calibrate_accelerometer_ellipsoid_strings = sizeof(slave_settings_calibrate_accelerometer_ellipsoid_strings) / sizeof(slave_settings_calibrate_accelerometer_ellipsoid_strings[0]);
+
+                
+                sprintf(string_buffer, "Calibrate Ellipsoid:\n");
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                if(calibration_step == 0){
+                    sprintf(string_buffer, "Place Upside down\n\n");
+                }else if(calibration_step == 1){
+                    sprintf(string_buffer, "Place Left\n\n");
+                }else if(calibration_step == 2){
+                    sprintf(string_buffer, "Place Right\n\n");
+                }else if(calibration_step == 3){
+                    sprintf(string_buffer, "Place Nose down\n\n");
+                }else if(calibration_step == 4){
+                    sprintf(string_buffer, "Place Nose up\n\n");
+                }else if(calibration_step == 5){
+                    sprintf(string_buffer, "Place Flat\n\n");
+                }else if(calibration_step == 6){
+                    sprintf(string_buffer, "DONE\n\n");
+                }
+
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                for (size_t i = 0; i < size_slave_settings_calibrate_accelerometer_ellipsoid_strings; i++){
+                    sprintf(string_buffer, "%s", slave_settings_calibrate_accelerometer_ellipsoid_strings[i]);
+                    string_length = strlen(string_buffer);
+                    oled_canvas_write(string_buffer, string_length, true);
+                    memset(string_buffer, 0, string_length);
+                    if(positive_mod(rotary_encoder_1_new_value, size_slave_settings_calibrate_accelerometer_ellipsoid_strings) == i){
+                        selected_row = i+3;
+                    }
+
+                    oled_canvas_write("\n", 1, true);
+                }
+
+                oled_canvas_invert_row(selected_row);
+                oled_canvas_show();
+            }else if(current_slave_settings == SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_LEVEL){
+                printf("Re-Rendering slave settings calibrate accelerometer level\n");
+                oled_canvas_clear();
+
+                uint8_t selected_row = 0;
+                uint8_t size_slave_settings_calibrate_accelerometer_level_strings = sizeof(slave_settings_calibrate_accelerometer_level_strings) / sizeof(slave_settings_calibrate_accelerometer_level_strings[0]);
+                
+                sprintf(string_buffer, "Calibrate Level:\n");
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                if(calibration_step == 0){
+                    sprintf(string_buffer, "#1 Place Flat\n\n");
+                }else if(calibration_step == 1){
+                    sprintf(string_buffer, "#2 Rotate +90 deg\n\n");
+                }else if(calibration_step == 2){
+                    sprintf(string_buffer, "#3 Rotate +90 deg\n\n");
+                }else if(calibration_step == 3){
+                    sprintf(string_buffer, "#4 Rotate +90 deg\n\n");
+                }else if(calibration_step == 4){
+                    sprintf(string_buffer, "DONE\n\n");
+                }
+
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                for (size_t i = 0; i < size_slave_settings_calibrate_accelerometer_level_strings; i++){
+                    sprintf(string_buffer, "%s", slave_settings_calibrate_accelerometer_level_strings[i]);
+                    string_length = strlen(string_buffer);
+                    oled_canvas_write(string_buffer, string_length, true);
+                    memset(string_buffer, 0, string_length);
+                    if(positive_mod(rotary_encoder_1_new_value, size_slave_settings_calibrate_accelerometer_level_strings) == i){
+                        selected_row = i+3;
+                    }
+
+                    oled_canvas_write("\n", 1, true);
+                }
+
+                oled_canvas_invert_row(selected_row);
+                oled_canvas_show();
+            }else if(current_slave_settings == SLAVE_SETTINGS_CALIBRATE_ROLL_PITCH_OFFSETS){
+                printf("Re-Rendering slave settings calibrate roll pitch offsets\n");
+                oled_canvas_clear();
+
+                uint8_t selected_row = 0;
+                uint8_t size_slave_settings_calibrate_roll_pitch_offsets_strings = sizeof(slave_settings_calibrate_roll_pitch_offsets_strings) / sizeof(slave_settings_calibrate_roll_pitch_offsets_strings[0]);
+                
+                sprintf(string_buffer, "Roll Pitch off:\n");
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                if(calibration_step == 0){
+                    sprintf(string_buffer, "#1 Place Flat\n\n");
+                }else if(calibration_step == 1){
+                    sprintf(string_buffer, "#2 Rotate +90 deg\n\n");
+                }else if(calibration_step == 2){
+                    sprintf(string_buffer, "#3 Rotate +90 deg\n\n");
+                }else if(calibration_step == 3){
+                    sprintf(string_buffer, "#4 Rotate +90 deg\n\n");
+                }else if(calibration_step == 4){
+                    sprintf(string_buffer, "DONE\n\n");
+                }
+
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                for (size_t i = 0; i < size_slave_settings_calibrate_roll_pitch_offsets_strings; i++){
+                    sprintf(string_buffer, "%s", slave_settings_calibrate_roll_pitch_offsets_strings[i]);
+                    string_length = strlen(string_buffer);
+                    oled_canvas_write(string_buffer, string_length, true);
+                    memset(string_buffer, 0, string_length);
+                    if(positive_mod(rotary_encoder_1_new_value, size_slave_settings_calibrate_roll_pitch_offsets_strings) == i){
+                        selected_row = i+3;
+                    }
+
+                    oled_canvas_write("\n", 1, true);
+                }
+
+                oled_canvas_invert_row(selected_row);
+                oled_canvas_show();
+            }else if(current_slave_settings == SLAVE_SETTINGS_GPS_SPEED_FF){
+                printf("ReRendering GPS speed FF setting\n");
+
+                oled_canvas_clear();
+
+                oled_canvas_write("\n", 1, true);
+                oled_canvas_write("\n", 1, true);
+
+                gps_speed_ff = gps_speed_ff + ((rotary_encoder_1_new_value - rotary_encoder_1_old_value) * gps_speed_ff_precision);
+
+                if(gps_speed_ff < 0.0f){
+                    gps_speed_ff = 0.0f;
+                }else if(flight_mode > 10.0f){
+                    gps_speed_ff = 10.0f;
+                }
+
+                sprintf(string_buffer, "\n\nFF gain: %.2f\n", gps_speed_ff);
+                string_length = strlen(string_buffer);
+                oled_canvas_write(string_buffer, string_length, true);
+                memset(string_buffer, 0, string_length);
+
+                oled_canvas_show();
             }
         }
         // Update the old value to trigger the function next time
@@ -1679,6 +2330,8 @@ void screen_menu_logic(){
     if (action_apply_flight_mode){
         action_apply_flight_mode = false;
         apply_flight_mode_to_slave();
+
+        apply_gps_speed_ff_to_slave();
     }
 
     if (action_apply_all_settings){
@@ -1689,6 +2342,41 @@ void screen_menu_logic(){
         apply_accelerometer_correction_to_slave();
         sleep_ms(5000);
         apply_flight_mode_to_slave();
+    }
+
+    if(action_calibrate_accelerometer_ellipsoid){
+        action_calibrate_accelerometer_ellipsoid = false;
+        apply_calibrate_accelerometer_ellipsoid();
+    }
+
+    if(action_calibrate_accelerometer_ellipsoid_stop){
+        action_calibrate_accelerometer_ellipsoid_stop = false;
+        apply_calibrate_accelerometer_ellipsoid_stop();
+    }
+
+    if(action_calibrate_accelerometer_level){
+        action_calibrate_accelerometer_level = false;
+        apply_calibrate_accelerometer_level();
+    }
+
+    if(action_calibrate_accelerometer_level_stop){
+        action_calibrate_accelerometer_level_stop = false;
+        apply_calibrate_accelerometer_level_stop();
+    }
+
+    if(action_calibrate_roll_pitch_offset){
+        action_calibrate_roll_pitch_offset = false;
+        apply_calibrate_roll_pitch_offset();
+    }
+
+    if(action_calibrate_roll_pitch_offset_stop){
+        action_calibrate_roll_pitch_offset_stop = false;
+        apply_calibrate_roll_pitch_offset_stop();
+    }
+
+    if(action_gps_speed_ff_to_slave){
+        action_gps_speed_ff_to_slave = false;
+        apply_gps_speed_ff_to_slave();
     }
 }
 
@@ -1819,6 +2507,9 @@ void button1_callback(){
         }else if(current_remote_settings == REMOTE_SETTINGS_MODE_EDIT_THROTTLE_SAFETY){
             printf("Clicked on REMOTE_SETTINGS_MODE_EDIT_THROTTLE_SAFETY item\n");
             current_remote_settings = REMOTE_SETTINGS_MODE_NONE;
+        }else if(current_remote_settings == REMOTE_SETTINGS_MODE_EDIT_TURN_OFF_ROLL_PITCH){
+            printf("Clicked on REMOTE_SETTINGS_MODE_EDIT_TURN_OFF_ROLL_PITCH item\n");
+            current_remote_settings = REMOTE_SETTINGS_MODE_NONE;
         }
     }else if(current_mode == MODE_CORRECT_BALANCE){
         if(current_correct_balance == CORRECT_BALANCE_MODE_NONE){
@@ -1869,9 +2560,132 @@ void button1_callback(){
 
                 current_slave_settings = SLAVE_SETTINGS_NONE;
                 refresh_page = false;
+            }else if(current_slave_settings == SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_ELLIPSOID){
+                printf("START CALIBRAING ACCELEROMETER ELLISPOD\n");
+                action_calibrate_accelerometer_ellipsoid = true;
+                calibration_step = 0;
+
+                // Do not try to change the page. This one enters the page and registers an action
+                refresh_page = true;
+            }else if(current_slave_settings == SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_LEVEL){
+                printf("START CALIBRAING ACCELEROMETER LEVEL\n");
+                action_calibrate_accelerometer_level = true;
+                calibration_step = 0;
+
+                // Do not try to change the page. This one enters the page and registers an action
+                refresh_page = true;
+            }else if(current_slave_settings == SLAVE_SETTINGS_CALIBRATE_ROLL_PITCH_OFFSETS){
+                printf("START CALIBRAING ROLL PITCH OFFSETS\n");
+                action_calibrate_roll_pitch_offset = true;
+                calibration_step = 0;
+
+                // Do not try to change the page. This one enters the page and registers an action
+                refresh_page = true;
             }
         }else if(current_slave_settings == SLAVE_SETTINGS_FLIGHT_MODE){
             printf("Clicked on SLAVE_SETTINGS_FLIGHT_MODE item\n");
+            current_slave_settings = SLAVE_SETTINGS_NONE;
+        }else if(current_slave_settings == SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_ELLIPSOID){
+            printf("Clicked on SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_ELLIPSOID item\n");
+
+            uint8_t size_slave_settings_calibrate_accelerometer_ellipsoid_strings = sizeof(slave_settings_calibrate_accelerometer_ellipsoid_strings) / sizeof(slave_settings_calibrate_accelerometer_ellipsoid_strings[0]);
+            uint16_t selected = positive_mod(rotary_encoder_1_new_value, size_slave_settings_calibrate_accelerometer_ellipsoid_strings);
+            current_slave_settings_calibrate_accelerometer_ellipsoid = selected;
+            if(selected == 1){
+                printf("Clicked on SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_ELLIPSOID_STOP item %d\n", selected);
+                current_slave_settings = SLAVE_SETTINGS_NONE;
+                action_calibrate_accelerometer_ellipsoid_stop = true;
+                calibration_step = 0;
+            }
+
+            if(current_slave_settings_calibrate_accelerometer_ellipsoid == SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_ELLIPSOID_CONTINUE){
+
+                if(calibration_step < accelerometer_ellipsoid_calibration_steps){
+                    action_calibrate_accelerometer_ellipsoid = true;
+                    calibration_step++;
+                    rerender_page = true;
+                    printf("Continuing calibration\n");
+                }else{
+                    printf("Stopping calibration\n");
+                    action_calibrate_accelerometer_ellipsoid_stop = true;
+                    calibration_step = 0;
+                    current_slave_settings = SLAVE_SETTINGS_NONE;
+                }
+                refresh_page = false;
+
+                printf("Clicked on SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_ELLIPSOID_CONTINUE item %d\n", calibration_step);
+
+                
+                // Do not try to change the page. This one enters the page and registers an action
+            }
+        }else if(current_slave_settings == SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_LEVEL){
+            printf("Clicked on SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_LEVEL item\n");
+
+            uint8_t size_slave_settings_calibrate_accelerometer_level_strings = sizeof(slave_settings_calibrate_accelerometer_level_strings) / sizeof(slave_settings_calibrate_accelerometer_level_strings[0]);
+            uint16_t selected = positive_mod(rotary_encoder_1_new_value, size_slave_settings_calibrate_accelerometer_level_strings);
+            current_slave_settings_calibrate_accelerometer_level = selected;
+            if(selected == 1){
+                printf("Clicked on SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_LEVEL_STOP item %d\n", selected);
+                current_slave_settings = SLAVE_SETTINGS_NONE;
+                action_calibrate_accelerometer_level_stop = true;
+                calibration_step = 0;
+            }
+
+            if(current_slave_settings_calibrate_accelerometer_level == SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_LEVEL_CONTINUE){
+
+                if(calibration_step < accelerometer_level_calibration_steps){
+                    action_calibrate_accelerometer_level = true;
+                    calibration_step++;
+                    rerender_page = true;
+                    printf("Continuing calibration\n");
+                }else{
+                    printf("Stopping calibration\n");
+                    action_calibrate_accelerometer_level_stop = true;
+                    calibration_step = 0;
+                    current_slave_settings = SLAVE_SETTINGS_NONE;
+                }
+                refresh_page = false;
+
+                printf("Clicked on SLAVE_SETTINGS_CALIBRATE_ACCELEROMETER_LEVEL_CONTINUE item %d\n", calibration_step);
+
+                
+                // Do not try to change the page. This one enters the page and registers an action
+            }
+        }else if(current_slave_settings == SLAVE_SETTINGS_CALIBRATE_ROLL_PITCH_OFFSETS){
+            printf("Clicked on SLAVE_SETTINGS_CALIBRATE_ROLL_PITCH_OFFSETS item\n");
+
+            uint8_t size_slave_settings_calibrate_roll_pitch_offsets_strings = sizeof(slave_settings_calibrate_roll_pitch_offsets_strings) / sizeof(slave_settings_calibrate_roll_pitch_offsets_strings[0]);
+            uint16_t selected = positive_mod(rotary_encoder_1_new_value, size_slave_settings_calibrate_roll_pitch_offsets_strings);
+            current_slave_settings_calibrate_roll_pitch_offsets = selected;
+            if(selected == 1){
+                printf("Clicked on SLAVE_SETTINGS_CALIBRATE_ROLL_PITCH_OFFSETS_STOP item %d\n", selected);
+                current_slave_settings = SLAVE_SETTINGS_NONE;
+                action_calibrate_roll_pitch_offset_stop = true;
+                calibration_step = 0;
+            }
+
+            if(current_slave_settings_calibrate_roll_pitch_offsets == SLAVE_SETTINGS_CALIBRATE_ROLL_PITCH_OFFSETS_CONTINUE){
+
+                if(calibration_step < roll_pitch_offset_calibration_steps){
+                    printf("Continuing calibration\n");
+                    action_calibrate_roll_pitch_offset = true;
+                    calibration_step++;
+                    rerender_page = true;
+                }else{
+                    printf("Stopping calibration\n");
+                    action_calibrate_roll_pitch_offset_stop = true;
+                    calibration_step = 0;
+                    current_slave_settings = SLAVE_SETTINGS_NONE;
+                }
+                refresh_page = false;
+
+                printf("Clicked on SLAVE_SETTINGS_CALIBRATE_ROLL_PITCH_OFFSETS_CONTINUE item %d\n", calibration_step);
+
+                
+                // Do not try to change the page. This one enters the page and registers an action
+            }
+        }else if(current_slave_settings == SLAVE_SETTINGS_GPS_SPEED_FF){
+            printf("Clicked on SLAVE_SETTINGS_GPS_SPEED_FF item\n");
             current_slave_settings = SLAVE_SETTINGS_NONE;
         }
     }
@@ -1914,12 +2728,10 @@ void apply_pid_to_slave(){
 
 void apply_accelerometer_correction_to_slave(){
     
-
-    char *string = generate_message_accelerometer_corrections_nrf24(
-        m_added_offset_roll,
-        m_added_offset_pitch);
+    char *string = generate_message_accelerometer_corrections_nrf24(m_added_offset_roll, m_added_offset_pitch);
 
     printf("'%s'\n", string);
+
     if(nrf24_transmit((uint8_t *)string)){
         gpio_put(2, 1);
     }
@@ -1943,6 +2755,89 @@ void apply_flight_mode_to_slave(){
     free(string);
 }
 
+void apply_calibrate_accelerometer_ellipsoid(){
+
+    char *string = generate_message_calibrate_accelerometer_ellipsoid_nrf24();
+
+    printf("'%s'\n", string);
+    if(nrf24_transmit((uint8_t *)string)){
+        gpio_put(2, 1);
+    }
+
+    free(string);
+}
+
+void apply_calibrate_accelerometer_ellipsoid_stop(){
+
+    char *string = generate_message_calibrate_accelerometer_ellipsoid_stop_nrf24();
+
+    printf("'%s'\n", string);
+    if(nrf24_transmit((uint8_t *)string)){
+        gpio_put(2, 1);
+    }
+
+    free(string);
+}
+
+void apply_calibrate_accelerometer_level(){
+
+    char *string = generate_message_calibrate_accelerometer_level_nrf24();
+
+    printf("'%s'\n", string);
+    if(nrf24_transmit((uint8_t *)string)){
+        gpio_put(2, 1);
+    }
+
+    free(string);
+}
+
+void apply_calibrate_accelerometer_level_stop(){
+
+    char *string = generate_message_calibrate_accelerometer_level_stop_nrf24();
+
+    printf("'%s'\n", string);
+    if(nrf24_transmit((uint8_t *)string)){
+        gpio_put(2, 1);
+    }
+
+    free(string);
+}
+
+void apply_calibrate_roll_pitch_offset(){
+
+    char *string = generate_message_calibrate_roll_pitch_offset_nrf24();
+
+    printf("'%s'\n", string);
+    if(nrf24_transmit((uint8_t *)string)){
+        gpio_put(2, 1);
+    }
+
+    free(string);
+}
+
+void apply_calibrate_roll_pitch_offset_stop(){
+
+    char *string = generate_message_calibrate_roll_pitch_offset_stop_nrf24();
+
+    printf("'%s'\n", string);
+    if(nrf24_transmit((uint8_t *)string)){
+        gpio_put(2, 1);
+    }
+
+    free(string);
+}
+
+void apply_gps_speed_ff_to_slave(){
+    
+    char *string = generate_message_gps_speed_ff_nrf24(gps_speed_ff);
+
+    printf("'%s'\n", string);
+    if(nrf24_transmit((uint8_t *)string)){
+        gpio_put(2, 1);
+    }
+
+    free(string);
+}
 
 void apply_all_settings_to_slave(){
     apply_pid_to_slave();
@@ -1958,8 +2853,10 @@ void apply_all_settings_to_slave(){
 #define STRING_LENGTH 32 // assuming the string length is 32
 
 void sync_remote_with_slave(){
+    char * remote_sync_base = "/remoteSyncBase/               "; // 31 + 1 for null terminator
 
-    if(nrf24_transmit("/remoteSyncBase/")){
+
+    if(nrf24_transmit((uint8_t *)remote_sync_base)){
         gpio_put(2, 1);
     }
 
@@ -2035,7 +2932,8 @@ void sync_remote_with_slave(){
     sleep_ms(2000);
 
 
-    if(nrf24_transmit("/remoteSyncAdded/")){
+    char * remote_sync_added = "/remoteSyncAdded/              "; // 31 + 1 for null terminator
+    if(nrf24_transmit((uint8_t *)remote_sync_added)){
         gpio_put(2, 1);
     }
 

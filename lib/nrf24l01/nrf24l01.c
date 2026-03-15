@@ -184,18 +184,17 @@ void nrf24_reset(uint8_t REG)
 void nrf24_tx_mode(uint8_t *address, uint8_t channel){
     send_command(FLUSH_RX);
 
-	// disable the chip before configuring the device
+	// Disable the chip before configuring
 	ce_disable();
 
 	write_register(RF_CH, channel);  // select the channel
 
 	write_register_multiple(TX_ADDR, address, 5, false);  // Write the TX address
 
-
-	// power up the device
+	// power up the device while preserving config settings
 	uint8_t config = read_register(CONFIG);
-    //	config = config | (1<<1);   // write 1 in the PWR_UP bit
-	config = config & (0xF2);    // write 0 in the PRIM_RX, and 1 in the PWR_UP, and all other bits are masked
+    config |= (1 << 1);    // Set PWR_UP bit
+    config &= ~(1 << 0);   // Clear PRIM_RX for TX mode
 	write_register(CONFIG, config);
 
 	// Enable the chip after configuring the device
@@ -332,7 +331,7 @@ void nrf24_read_all(uint8_t *data){
 	}
 }
 
-bool nrf24_init(spi_inst_t *spi_temp, uint pin_csn_temp, uint pin_ce_temp, bool init_spi){
+bool nrf24_init(spi_inst_t *spi_temp, uint pin_csn_temp, uint pin_ce_temp, bool init_spi, bool use_crc){
     csn_pin = pin_csn_temp;
     ce_pin = pin_ce_temp;
     spi = spi_temp;
@@ -362,6 +361,8 @@ bool nrf24_init(spi_inst_t *spi_temp, uint pin_csn_temp, uint pin_ce_temp, bool 
 
     nrf24_reset(0);
     write_register(CONFIG, 0b00000010);// Will come back
+    nrf24_crc(use_crc);
+
     // printf("CONFIG "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(CONFIG)));
     write_register(EN_AA, 0b00000000); // No auto ACK
     // printf("EN_AA "BYTE_TO_BINARY_PATTERN"\n", BYTE_TO_BINARY(read_register(EN_AA)));
@@ -384,11 +385,10 @@ void nrf24_crc(uint8_t enable){
     uint8_t config = read_register(CONFIG);
 
     if(enable){
-        config |= (1 << 3); // Enable CRC.
-        config |= (1 << 2);   // Set to 1 for 2 bytes CRC, and 0 for 1 byte CRC.
+        config |= (1 << 3);  // Set EN_CRC to enable CRC.
+        config |= (1 << 2);  // Set CRCO for 2-byte CRC.
     }else{
-        config |= (0 << 3); // Enable CRC.
-        config |= (0 << 2);   // Set to 1 for 2 bytes CRC, and 0 for 1 byte CRC.
+        config &= ~(1 << 3); // Clear EN_CRC to disable CRC.
     }
 
     write_register(CONFIG, config);

@@ -14,7 +14,10 @@
         "esp_01.h": "c",
         "rotary-encoder.h": "c",
         "i2c.h": "c",
-        "oled-display.h": "c"
+        "oled-display.h": "c",
+        "uart.h": "c",
+        "irq.h": "c",
+        "crsf.h": "c"
     },
     "cSpell.words": [
         "deadzone"
